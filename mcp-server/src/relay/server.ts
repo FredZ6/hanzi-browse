@@ -17,6 +17,11 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
+import {
+  getClaudeCredentials,
+  getClaudeKeychainCredentials,
+  getCodexCredentials,
+} from '../llm/credentials.js';
 
 const DEFAULT_PORT = 7862;
 const port = parseInt(process.env.WS_RELAY_PORT || String(DEFAULT_PORT), 10);
@@ -187,6 +192,69 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    // Handle read_credentials — relay reads from filesystem (replaces native host)
+    if (msg.type === 'read_credentials' && client.role === 'extension') {
+      const { credentialType } = msg;
+      try {
+        if (credentialType === 'claude') {
+          const creds = getClaudeCredentials() || getClaudeKeychainCredentials();
+          if (creds) {
+            ws.send(JSON.stringify({
+              type: 'credentials_result',
+              credentialType: 'claude',
+              credentials: {
+                accessToken: creds.accessToken,
+                refreshToken: creds.refreshToken,
+                expiresAt: creds.expiresAt,
+              },
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              type: 'credentials_result',
+              credentialType: 'claude',
+              error: 'Claude credentials not found. Run `claude login` first.',
+            }));
+          }
+        } else if (credentialType === 'codex') {
+          const creds = getCodexCredentials();
+          if (creds) {
+            ws.send(JSON.stringify({
+              type: 'credentials_result',
+              credentialType: 'codex',
+              credentials: {
+                accessToken: creds.accessToken,
+                refreshToken: creds.refreshToken,
+                accountId: creds.accountId,
+              },
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              type: 'credentials_result',
+              credentialType: 'codex',
+              error: 'Codex credentials not found. Run `codex auth login` first.',
+            }));
+          }
+        } else {
+          ws.send(JSON.stringify({
+            type: 'credentials_result',
+            error: `Unknown credential type: ${credentialType}`,
+          }));
+        }
+      } catch (err: any) {
+        ws.send(JSON.stringify({
+          type: 'credentials_result',
+          error: err.message,
+        }));
+      }
+      return;
+    }
+
+    // Handle proxy_api_call — relay proxies API calls with impersonation headers
+    if (msg.type === 'proxy_api_call' && client.role === 'extension') {
+      handleApiProxy(ws, msg);
+      return;
+    }
+
     const raw = data.toString();
 
     if (client.role === 'extension') {
@@ -210,6 +278,93 @@ wss.on('connection', (ws) => {
     log(`WebSocket error: ${err.message}`);
   });
 });
+
+/**
+ * Proxy API calls with Claude Code impersonation headers.
+ * Reads OAuth token, makes the API call, streams SSE events back to extension.
+ */
+async function handleApiProxy(ws: WebSocket, msg: any): Promise<void> {
+  const { requestId, url, body } = msg;
+
+  try {
+    // Read OAuth credentials
+    const creds = getClaudeCredentials() || getClaudeKeychainCredentials();
+    if (!creds) {
+      ws.send(JSON.stringify({ type: 'proxy_api_error', requestId, error: 'No Claude credentials found' }));
+      return;
+    }
+
+    // Claude Code impersonation headers
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${creds.accessToken}`,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14',
+      'x-app': 'cli',
+      'user-agent': 'claude-code/2.1.29 (Darwin; arm64)',
+    };
+
+    const response = await fetch(url, { method: 'POST', headers, body });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      ws.send(JSON.stringify({
+        type: 'proxy_api_error',
+        requestId,
+        error: `API error: ${response.status} - ${errorText.slice(0, 500)}`,
+      }));
+      return;
+    }
+
+    // Parse SSE stream and forward events to extension
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop()!;
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
+
+        try {
+          const event = JSON.parse(data);
+          // Forward each SSE event to extension
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'proxy_stream_chunk',
+              requestId,
+              data: event,
+            }));
+          }
+        } catch {
+          // Skip malformed JSON
+        }
+      }
+    }
+
+    // Signal stream complete
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'proxy_stream_end', requestId }));
+    }
+  } catch (err: any) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'proxy_api_error',
+        requestId,
+        error: err.message,
+      }));
+    }
+  }
+}
 
 // Graceful shutdown
 process.on('SIGINT', () => {

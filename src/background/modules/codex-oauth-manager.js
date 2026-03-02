@@ -5,6 +5,8 @@
  * to use ChatGPT Pro/Plus subscription quota instead of API rate limits.
  */
 
+import { relayRequest, isRelayConnected } from './mcp-bridge.js';
+
 const NATIVE_HOST_NAME = 'com.hanzi_in_chrome.oauth_host';
 
 /**
@@ -17,6 +19,61 @@ export async function importCodexCredentials() {
   console.log('[Codex OAuth] ===== Importing Codex CLI Credentials =====');
   console.log('[Codex OAuth] This reads tokens from ~/.codex/auth.json');
 
+  // Try relay first (no native host needed), then fall back to native host
+  try {
+    const result = await importCodexViaRelay();
+    return result;
+  } catch (relayErr) {
+    console.log('[Codex OAuth] Relay not available, trying native host:', relayErr.message);
+  }
+
+  return importCodexViaNativeHost();
+}
+
+/**
+ * Read Codex credentials via WebSocket relay server.
+ */
+async function importCodexViaRelay() {
+  if (!isRelayConnected()) {
+    throw new Error('Relay not connected');
+  }
+
+  console.log('[Codex OAuth] Reading credentials via relay...');
+  const response = await relayRequest(
+    { type: 'read_credentials', credentialType: 'codex' },
+    'credentials_result',
+    10000
+  );
+
+  if (response.error) {
+    throw new Error(response.error);
+  }
+
+  if (!response.credentials?.accessToken) {
+    throw new Error('No accessToken in relay response');
+  }
+
+  const { accessToken, refreshToken, accountId } = response.credentials;
+  console.log('[Codex OAuth] ✓ Credentials received via relay');
+  console.log('[Codex OAuth] Access token:', accessToken.substring(0, 20) + '...');
+
+  // Save credentials to storage
+  await chrome.storage.local.set({
+    codexAccessToken: accessToken,
+    codexRefreshToken: refreshToken,
+    codexAccountId: accountId,
+    codexAuthState: 'authenticated',
+    codexTokenSource: 'codex_cli'
+  });
+
+  console.log('[Codex OAuth] ✓ Credentials saved to storage');
+  return { accessToken, refreshToken, accountId };
+}
+
+/**
+ * Read Codex credentials via native messaging host (legacy path).
+ */
+function importCodexViaNativeHost() {
   return new Promise((resolve, reject) => {
     let port = null;
     let resolved = false;

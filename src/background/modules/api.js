@@ -8,6 +8,7 @@ import { buildSystemPrompt } from './system-prompt.js';
 import { DOMAIN_SKILLS } from './domain-skills.js';
 import { createProvider } from './providers/provider-factory.js';
 import { getAccessToken, refreshAccessToken } from './oauth-manager.js';
+import { proxyApiCall, isRelayConnected } from './mcp-bridge.js';
 
 // Configuration (loaded from storage)
 let config = {
@@ -225,10 +226,20 @@ export async function callLLMSimple(promptOrOptions, maxTokensArg = 800) {
   // Use Anthropic API directly (native host will add credentials from keychain)
   const apiUrl = 'https://api.anthropic.com/v1/messages';
 
-  console.log(`[API] callLLMSimple: Routing through native host (streaming: ${useStreaming})`);
-
-  // Route through native host (which loads credentials from keychain)
-  const result = await callLLMSimpleViaProxy(apiUrl, requestBody);
+  // Route through relay proxy first (no native host needed), fall back to native host
+  let result;
+  if (isRelayConnected()) {
+    try {
+      console.log('[API] callLLMSimple: Routing through relay proxy');
+      result = await callLLMSimpleViaRelayProxy(apiUrl, requestBody);
+    } catch (relayErr) {
+      console.log('[API] callLLMSimple: Relay failed, trying native host:', relayErr.message);
+      result = await callLLMSimpleViaProxy(apiUrl, requestBody);
+    }
+  } else {
+    console.log(`[API] callLLMSimple: Routing through native host (streaming: ${useStreaming})`);
+    result = await callLLMSimpleViaProxy(apiUrl, requestBody);
+  }
 
   // Return full response for messages-based calls, just text for simple prompts
   if (returnFullResponse) {
@@ -358,6 +369,115 @@ function getNativeHostPort() {
   }
 
   return nativeHostPort;
+}
+
+/**
+ * Make streaming API call through WebSocket relay proxy.
+ * The relay adds Claude Code impersonation headers that browsers can't set.
+ * Used for the main agent loop (callLLM) with OAuth credentials.
+ * @private
+ */
+async function callLLMThroughRelayProxy(messages, onTextChunk = null, log = () => {}, currentUrl = null) {
+  const provider = createProvider(config.apiBaseUrl || '', config);
+  const isClaudeModel = provider.getName() === 'anthropic';
+  const systemPrompt = buildSystemPrompt({ isClaudeModel });
+  const tools = getToolsForUrl(currentUrl);
+
+  // Always stream for OAuth (required by Claude Code credentials)
+  const requestBody = provider.buildRequestBody(messages, systemPrompt, tools, true);
+  const apiUrl = provider.buildUrl(true);
+  const requestBodyStr = JSON.stringify(requestBody);
+
+  apiCallCounter++;
+  const callNumber = apiCallCounter;
+  const startTime = Date.now();
+
+  // Accumulate streaming response
+  let streamResult = { content: [], stop_reason: null, usage: null };
+  let currentTextBlock = null;
+  let currentToolUse = null;
+
+  const onChunk = (event) => {
+    if (event.type === 'content_block_start') {
+      if (event.content_block?.type === 'text') {
+        currentTextBlock = { type: 'text', text: '' };
+      } else if (event.content_block?.type === 'tool_use') {
+        currentToolUse = {
+          type: 'tool_use',
+          id: event.content_block.id,
+          name: event.content_block.name,
+          input: {}
+        };
+      }
+    } else if (event.type === 'content_block_delta') {
+      if (event.delta?.type === 'text_delta' && currentTextBlock) {
+        currentTextBlock.text += event.delta.text;
+        if (onTextChunk) onTextChunk(event.delta.text);
+      } else if (event.delta?.type === 'input_json_delta' && currentToolUse) {
+        currentToolUse._inputJson = (currentToolUse._inputJson || '') + event.delta.partial_json;
+      }
+    } else if (event.type === 'content_block_stop') {
+      if (currentTextBlock) {
+        streamResult.content.push(currentTextBlock);
+        currentTextBlock = null;
+      } else if (currentToolUse) {
+        try {
+          currentToolUse.input = JSON.parse(currentToolUse._inputJson || '{}');
+        } catch (e) {
+          currentToolUse.input = {};
+        }
+        delete currentToolUse._inputJson;
+        streamResult.content.push(currentToolUse);
+        currentToolUse = null;
+      }
+    } else if (event.type === 'message_delta') {
+      streamResult.stop_reason = event.delta?.stop_reason;
+      streamResult.usage = event.usage;
+    }
+  };
+
+  await proxyApiCall(apiUrl, requestBodyStr, onChunk);
+
+  const duration = Date.now() - startTime;
+  await log('API', `#${callNumber} ${config.model} → ${streamResult.stop_reason} (relay)`, {
+    model: config.model,
+    messages: messages.length,
+    stopReason: streamResult.stop_reason,
+    tokens: streamResult.usage,
+    duration: `${duration}ms`,
+  });
+
+  return streamResult;
+}
+
+/**
+ * Simple LLM call through relay proxy (no tools, for callLLMSimple).
+ * Always streams since Claude Code OAuth requires it.
+ * @private
+ */
+async function callLLMSimpleViaRelayProxy(apiUrl, requestBody) {
+  // Always stream for OAuth
+  const body = { ...requestBody, stream: true };
+
+  let streamResult = { content: [], stop_reason: null, usage: null };
+  let currentTextBlock = null;
+
+  const onChunk = (event) => {
+    if (event.type === 'content_block_start' && event.content_block?.type === 'text') {
+      currentTextBlock = { type: 'text', text: '' };
+    } else if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && currentTextBlock) {
+      currentTextBlock.text += event.delta.text;
+    } else if (event.type === 'content_block_stop' && currentTextBlock) {
+      streamResult.content.push(currentTextBlock);
+      currentTextBlock = null;
+    } else if (event.type === 'message_delta') {
+      streamResult.stop_reason = event.delta?.stop_reason;
+      streamResult.usage = event.usage;
+    }
+  };
+
+  await proxyApiCall(apiUrl, JSON.stringify(body), onChunk, 90000);
+  return streamResult;
 }
 
 /**
@@ -865,10 +985,15 @@ export async function callLLM(messages, onTextChunk = null, log = () => {}, curr
   // Full request body is built later after potential config changes
   const apiUrl = provider.buildUrl(useStreaming);
 
-  // If calling Anthropic API directly with OAuth, use native host proxy (bypasses CORS)
-  // API key calls try direct fetch first (with dangerous-direct-browser-access header)
+  // OAuth calls require Claude Code impersonation headers (user-agent, x-app: cli)
+  // that browsers can't set due to CORS. Route through relay proxy (or native host fallback).
   if (apiUrl.includes('api.anthropic.com') && config.authMethod === 'oauth') {
-    return await callLLMThroughProxy(messages, onTextChunk, log, currentUrl);
+    try {
+      return await callLLMThroughRelayProxy(messages, onTextChunk, log, currentUrl);
+    } catch (relayErr) {
+      console.log('[API] Relay proxy failed, trying native host:', relayErr.message);
+      return await callLLMThroughProxy(messages, onTextChunk, log, currentUrl);
+    }
   }
 
   // If calling Codex API (ChatGPT backend), use the provider's native messaging call

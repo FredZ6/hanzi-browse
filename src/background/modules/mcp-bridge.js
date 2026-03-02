@@ -36,11 +36,25 @@ let getInfoRequestCounter = 0;
 const pendingEscalateRequests = new Map();
 let escalateRequestCounter = 0;
 
+// Pending relay requests (for direct relay responses like read_credentials)
+// Map<responseType, { resolve, reject, timeout }>
+const pendingRelayRequests = new Map();
+
+// Pending API proxy streams (relay proxies API calls with impersonation headers)
+// Map<requestId, { onChunk, resolve, reject, timeout }>
+const pendingApiProxies = new Map();
+let apiProxyCounter = 0;
+
 // Callbacks for MCP events
 let onStartTask = null;
 let onSendMessage = null;
 let onStopTask = null;
 let onScreenshot = null;
+
+// Callbacks for remote tool execution (MCP server-driven agent loop)
+let onCreateSession = null;
+let onExecuteTool = null;
+let onCloseSession = null;
 
 /**
  * Initialize MCP bridge with callbacks.
@@ -51,6 +65,9 @@ export function initMcpBridge(callbacks) {
   onSendMessage = callbacks.onSendMessage;
   onStopTask = callbacks.onStopTask;
   onScreenshot = callbacks.onScreenshot;
+  onCreateSession = callbacks.onCreateSession || null;
+  onExecuteTool = callbacks.onExecuteTool || null;
+  onCloseSession = callbacks.onCloseSession || null;
 
   console.log('[MCP Bridge] Initialized');
 
@@ -116,6 +133,34 @@ export function connectToRelay() {
           return;
         }
 
+        // Check for pending relay request responses (e.g., credentials_result)
+        if (pendingRelayRequests.has(message.type)) {
+          const pending = pendingRelayRequests.get(message.type);
+          clearTimeout(pending.timeout);
+          pendingRelayRequests.delete(message.type);
+          pending.resolve(message);
+          return;
+        }
+
+        // Check for API proxy stream events (relay proxies API calls with impersonation headers)
+        if (message.type === 'proxy_stream_chunk' || message.type === 'proxy_stream_end' || message.type === 'proxy_api_error') {
+          const pending = pendingApiProxies.get(message.requestId);
+          if (pending) {
+            if (message.type === 'proxy_stream_chunk') {
+              if (pending.onChunk) pending.onChunk(message.data);
+            } else if (message.type === 'proxy_stream_end') {
+              clearTimeout(pending.timeout);
+              pendingApiProxies.delete(message.requestId);
+              pending.resolve();
+            } else if (message.type === 'proxy_api_error') {
+              clearTimeout(pending.timeout);
+              pendingApiProxies.delete(message.requestId);
+              pending.reject(new Error(message.error));
+            }
+          }
+          return;
+        }
+
         // Route through the same command handler as polling
         // Messages from MCP/CLI come in the same format as inbox commands
         // but with mcp_ prefix (e.g., mcp_start_task → start_task)
@@ -177,6 +222,10 @@ function normalizeIncomingMessage(message) {
     'mcp_escalate_response': 'escalate_response',
     'mcp_poll_results': null, // Not applicable over WebSocket (push-based)
     'llm_request': 'llm_request',
+    // Remote tool execution (MCP server-driven agent loop)
+    'mcp_create_session': 'create_session',
+    'mcp_execute_tool': 'execute_tool',
+    'mcp_close_session': 'close_session',
   };
 
   const mappedType = typeMap[type];
@@ -335,6 +384,25 @@ async function handleMcpCommand(command) {
       // MCP server requesting LLM completion
       debugLog('llm_request received', { requestId: command.requestId, prompt: command.prompt?.substring(0, 50) });
       handleLLMRequest(command);
+      break;
+
+    // Remote tool execution (MCP server-driven agent loop)
+    case 'create_session':
+      if (onCreateSession) {
+        onCreateSession(command.sessionId, command.url);
+      }
+      break;
+
+    case 'execute_tool':
+      if (onExecuteTool) {
+        onExecuteTool(command.sessionId, command.toolName, command.toolInput, command.toolUseId);
+      }
+      break;
+
+    case 'close_session':
+      if (onCloseSession) {
+        onCloseSession(command.sessionId);
+      }
       break;
   }
 }
@@ -555,6 +623,42 @@ async function handleLLMRequest(command) {
 }
 
 /**
+ * Send session_created result to MCP server
+ */
+export function sendSessionCreated(sessionId, tabId, windowId, error = null) {
+  sendToNativeHost({
+    type: 'mcp_session_created',
+    sessionId,
+    tabId,
+    windowId,
+    error,
+  });
+}
+
+/**
+ * Send tool_result to MCP server
+ */
+export function sendToolResult(sessionId, toolUseId, content, error = null) {
+  sendToNativeHost({
+    type: 'mcp_tool_result',
+    sessionId,
+    toolUseId,
+    content,
+    error,
+  });
+}
+
+/**
+ * Send session_closed to MCP server
+ */
+export function sendSessionClosed(sessionId) {
+  sendToNativeHost({
+    type: 'mcp_session_closed',
+    sessionId,
+  });
+}
+
+/**
  * Get MCP session data (including context)
  */
 export function getMcpSession(sessionId) {
@@ -608,6 +712,10 @@ function normalizeOutgoingMessage(message) {
     'mcp_get_info': 'mcp_get_info',
     'mcp_escalate': 'mcp_escalate',
     'mcp_llm_response': 'llm_response',
+    // Remote tool execution responses
+    'mcp_session_created': 'session_created',
+    'mcp_tool_result': 'tool_result',
+    'mcp_session_closed': 'session_closed',
   };
 
   const mappedType = typeMap[type] || type;
@@ -626,4 +734,66 @@ export function isMcpSession(sessionId) {
  */
 export function getMcpSessions() {
   return Array.from(mcpSessions.keys());
+}
+
+/**
+ * Send a request directly to the relay and wait for a response.
+ * Used for relay-handled operations like credential reading.
+ *
+ * @param {Object} message - Message to send to the relay
+ * @param {string} responseType - Expected response message type
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @returns {Promise<Object>} Response message from the relay
+ */
+export function relayRequest(message, responseType, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) {
+      reject(new Error('Relay not connected'));
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      pendingRelayRequests.delete(responseType);
+      reject(new Error('Relay request timed out'));
+    }, timeoutMs);
+
+    pendingRelayRequests.set(responseType, { resolve, reject, timeout });
+    relaySocket.send(JSON.stringify(message));
+  });
+}
+
+/**
+ * Proxy an API call through the relay server.
+ * The relay adds Claude Code impersonation headers (user-agent, x-app)
+ * that browsers can't set due to CORS restrictions.
+ *
+ * @param {string} url - API endpoint URL
+ * @param {string} body - Serialized JSON request body
+ * @param {Function} onChunk - Called with each SSE event object
+ * @param {number} timeoutMs - Timeout in milliseconds
+ * @returns {Promise<void>} Resolves when stream completes
+ */
+export function proxyApiCall(url, body, onChunk, timeoutMs = 150000) {
+  return new Promise((resolve, reject) => {
+    if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) {
+      reject(new Error('Relay not connected'));
+      return;
+    }
+
+    const requestId = `proxy_${Date.now()}_${++apiProxyCounter}`;
+
+    const timeout = setTimeout(() => {
+      pendingApiProxies.delete(requestId);
+      reject(new Error('API proxy request timed out'));
+    }, timeoutMs);
+
+    pendingApiProxies.set(requestId, { onChunk, resolve, reject, timeout });
+
+    relaySocket.send(JSON.stringify({
+      type: 'proxy_api_call',
+      requestId,
+      url,
+      body,
+    }));
+  });
 }

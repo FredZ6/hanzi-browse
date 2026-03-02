@@ -1412,6 +1412,14 @@ function SettingsModal({ config, onClose }) {
           onClick: () => setActiveTab("skills"),
           children: "Domain Skills"
         }
+      ),
+      /* @__PURE__ */ u$1(
+        "button",
+        {
+          class: `tab ${activeTab === "license" ? "active" : ""}`,
+          onClick: () => setActiveTab("license"),
+          children: "License"
+        }
       )
     ] }),
     /* @__PURE__ */ u$1("div", { class: "modal-body", children: [
@@ -1446,7 +1454,8 @@ function SettingsModal({ config, onClose }) {
           onEdit: handleEditSkill,
           onRemove: config.removeUserSkill
         }
-      )
+      ),
+      activeTab === "license" && /* @__PURE__ */ u$1(LicenseTab, {})
     ] }),
     /* @__PURE__ */ u$1("div", { class: "modal-footer", children: [
       /* @__PURE__ */ u$1("button", { class: "btn btn-secondary", onClick: onClose, children: "Close" }),
@@ -1460,7 +1469,7 @@ function ProvidersTab({ localKeys, setLocalKeys, selectedProvider, setSelectedPr
       /* @__PURE__ */ u$1("h4", { children: "Claude Code Plan" }),
       /* @__PURE__ */ u$1("p", { class: "provider-desc", children: [
         "Use your Claude Pro/Max subscription. ",
-        /* @__PURE__ */ u$1("a", { href: "https://github.com/hanzili/llm-in-chrome#claude-code-plan-setup", target: "_blank", children: "Setup guide" })
+        /* @__PURE__ */ u$1("a", { href: "https://github.com/hanzili/hanzi-in-chrome#claude-code-plan-setup", target: "_blank", children: "Setup guide" })
       ] }),
       config.oauthStatus.isAuthenticated ? /* @__PURE__ */ u$1("div", { class: "connected-status", children: [
         /* @__PURE__ */ u$1("span", { class: "status-badge connected", children: "Connected" }),
@@ -1471,7 +1480,7 @@ function ProvidersTab({ localKeys, setLocalKeys, selectedProvider, setSelectedPr
       /* @__PURE__ */ u$1("h4", { children: "Codex Plan" }),
       /* @__PURE__ */ u$1("p", { class: "provider-desc", children: [
         "Use your ChatGPT Pro/Plus subscription. ",
-        /* @__PURE__ */ u$1("a", { href: "https://github.com/hanzili/llm-in-chrome#codex-plan-setup", target: "_blank", children: "Setup guide" })
+        /* @__PURE__ */ u$1("a", { href: "https://github.com/hanzili/hanzi-in-chrome#codex-plan-setup", target: "_blank", children: "Setup guide" })
       ] }),
       config.codexStatus.isAuthenticated ? /* @__PURE__ */ u$1("div", { class: "connected-status", children: [
         /* @__PURE__ */ u$1("span", { class: "status-badge connected", children: "Connected" }),
@@ -1513,9 +1522,9 @@ function ProvidersTab({ localKeys, setLocalKeys, selectedProvider, setSelectedPr
       /* @__PURE__ */ u$1("p", { class: "provider-desc", children: [
         "Control this browser from Claude Code or any MCP client.",
         " ",
-        /* @__PURE__ */ u$1("a", { href: "https://github.com/hanzili/llm-in-chrome#mcp-server-integration", target: "_blank", children: "Setup guide" })
+        /* @__PURE__ */ u$1("a", { href: "https://github.com/hanzili/hanzi-in-chrome#mcp-server-integration", target: "_blank", children: "Setup guide" })
       ] }),
-      /* @__PURE__ */ u$1("code", { class: "install-cmd", children: "npm install -g llm-in-chrome-mcp" })
+      /* @__PURE__ */ u$1("code", { class: "install-cmd", children: "npm install -g hanzi-in-chrome-mcp" })
     ] })
   ] });
 }
@@ -1571,6 +1580,102 @@ function CustomModelsTab({ customModels, newModel, setNewModel, onAdd, onRemove 
         /* @__PURE__ */ u$1("button", { class: "btn btn-danger btn-sm", onClick: () => onRemove(i2), children: "Remove" })
       ] }, i2))
     ] })
+  ] });
+}
+function LicenseTab() {
+  var _a, _b;
+  const [status, setStatus] = d(null);
+  const [keyInput, setKeyInput] = d("");
+  const [activating, setActivating] = d(false);
+  const [message, setMessage] = d("");
+  y(() => {
+    chrome.runtime.sendMessage({ type: "GET_LICENSE_STATUS" }, (res) => {
+      if (res) setStatus(res);
+    });
+  }, []);
+  const handleActivate = () => {
+    if (!keyInput.trim()) return;
+    setActivating(true);
+    setMessage("");
+    chrome.runtime.sendMessage({ type: "ACTIVATE_LICENSE", payload: { key: keyInput.trim() } }, (res) => {
+      setActivating(false);
+      setMessage(res.message);
+      if (res.success) {
+        setKeyInput("");
+        chrome.runtime.sendMessage({ type: "GET_LICENSE_STATUS" }, (s2) => {
+          if (s2) setStatus(s2);
+        });
+      }
+    });
+  };
+  const handleDeactivate = () => {
+    chrome.runtime.sendMessage({ type: "DEACTIVATE_LICENSE" }, () => {
+      chrome.runtime.sendMessage({ type: "GET_LICENSE_STATUS" }, (s2) => {
+        if (s2) setStatus(s2);
+      });
+      setMessage("License deactivated.");
+    });
+  };
+  if (!status) return /* @__PURE__ */ u$1("div", { class: "tab-content", children: /* @__PURE__ */ u$1("p", { children: "Loading..." }) });
+  return /* @__PURE__ */ u$1("div", { class: "tab-content", children: [
+    /* @__PURE__ */ u$1("div", { class: "provider-section", children: [
+      /* @__PURE__ */ u$1("h4", { children: "Current Plan" }),
+      /* @__PURE__ */ u$1("p", { class: "provider-desc", style: { fontSize: "1.1em", fontWeight: 500 }, children: status.isPro ? /* @__PURE__ */ u$1(k$1, { children: [
+        /* @__PURE__ */ u$1("span", { class: "status-badge connected", children: "Pro" }),
+        " Unlimited tasks"
+      ] }) : /* @__PURE__ */ u$1(k$1, { children: [
+        /* @__PURE__ */ u$1("span", { class: "status-badge", children: [
+          status.tasksUsed,
+          "/",
+          status.taskLimit,
+          " tasks used"
+        ] }),
+        " Free tier"
+      ] }) })
+    ] }),
+    !status.isPro && /* @__PURE__ */ u$1("div", { class: "provider-section", children: [
+      /* @__PURE__ */ u$1("h4", { children: "Upgrade to Pro" }),
+      /* @__PURE__ */ u$1("p", { class: "provider-desc", children: "Unlimited tasks for a one-time payment of $29." }),
+      /* @__PURE__ */ u$1(
+        "a",
+        {
+          href: "https://hanziinchrome.lemonsqueezy.com/checkout/buy/5f9be29a-b862-43bf-a440-b4a3cdc9b28e",
+          target: "_blank",
+          class: "btn btn-primary",
+          style: { display: "inline-block", textDecoration: "none", marginBottom: "12px" },
+          children: "Buy Pro — $29"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ u$1("div", { class: "provider-section", children: [
+      /* @__PURE__ */ u$1("h4", { children: status.isPro ? "License Key" : "Activate License" }),
+      status.isPro ? /* @__PURE__ */ u$1("div", { class: "connected-status", children: [
+        /* @__PURE__ */ u$1("code", { style: { fontSize: "0.85em" }, children: [
+          (_a = status.key) == null ? void 0 : _a.slice(0, 8),
+          "...",
+          (_b = status.key) == null ? void 0 : _b.slice(-4)
+        ] }),
+        /* @__PURE__ */ u$1("button", { class: "btn btn-secondary btn-sm", onClick: handleDeactivate, children: "Deactivate" })
+      ] }) : /* @__PURE__ */ u$1("div", { class: "api-key-input", children: [
+        /* @__PURE__ */ u$1(
+          "input",
+          {
+            type: "text",
+            value: keyInput,
+            onInput: (e2) => setKeyInput(e2.target.value),
+            placeholder: "Paste license key...",
+            onKeyDown: (e2) => e2.key === "Enter" && handleActivate()
+          }
+        ),
+        /* @__PURE__ */ u$1("button", { class: "btn btn-primary", onClick: handleActivate, disabled: activating, children: activating ? "Activating..." : "Activate" })
+      ] }),
+      message && /* @__PURE__ */ u$1("p", { class: "provider-desc", style: { marginTop: "8px" }, children: message })
+    ] }),
+    !status.isPro && /* @__PURE__ */ u$1("div", { class: "provider-section", children: /* @__PURE__ */ u$1("p", { class: "provider-desc", style: { opacity: 0.7, fontSize: "0.85em" }, children: [
+      "Tip: MCP/CLI users can also set the ",
+      /* @__PURE__ */ u$1("code", { children: "HANZI_IN_CHROME_LICENSE_KEY" }),
+      " environment variable."
+    ] }) })
   ] });
 }
 function SkillsTab({ userSkills, builtInSkills, skillForm, setSkillForm, onAdd, onEdit, onRemove }) {
@@ -1666,7 +1771,7 @@ function EmptyState({ onSelectExample }) {
       /* @__PURE__ */ u$1("circle", { cx: "12", cy: "12", r: "10" }),
       /* @__PURE__ */ u$1("path", { d: "M12 6v6l4 2" })
     ] }) }),
-    /* @__PURE__ */ u$1("h2", { children: "LLM in Chrome" }),
+    /* @__PURE__ */ u$1("h2", { children: "Hanzi in Chrome" }),
     /* @__PURE__ */ u$1("p", { children: "Describe what you want to accomplish and the AI will browse autonomously to complete your task." }),
     /* @__PURE__ */ u$1("div", { class: "empty-examples", children: EXAMPLES.map((example, i2) => /* @__PURE__ */ u$1(
       "button",

@@ -25,7 +25,8 @@ import { ensureDebugger, detachDebugger, sendDebuggerCommand, initDebugger, isNe
 import { showAgentIndicators, hideAgentIndicators, hideIndicatorsForToolUse, showIndicatorsAfterToolUse } from './managers/indicator-manager.js';
 import { ensureTabGroup, addTabToGroup, validateTabInGroup, isTabManagedByAgent, registerTabCleanupListener, initTabManager } from './managers/tab-manager.js';
 import {
-  initMcpBridge, startMcpPolling, sendMcpUpdate, sendMcpComplete, sendMcpError, sendMcpScreenshot, queryMemory, sendEscalation
+  initMcpBridge, startMcpPolling, sendMcpUpdate, sendMcpComplete, sendMcpError, sendMcpScreenshot, queryMemory, sendEscalation,
+  sendSessionCreated, sendToolResult, sendSessionClosed
 } from './modules/mcp-bridge.js';
 import { checkAndIncrementUsage, activateLicense, getLicenseStatus, deactivateLicense } from './managers/license-manager.js';
 
@@ -1647,12 +1648,125 @@ async function handleMcpScreenshot(sessionId) {
   }
 }
 
+// ============================================
+// REMOTE TOOL EXECUTION (MCP Server-Driven Agent Loop)
+// ============================================
+
+// Track remote sessions (separate from mcpSessions which are extension-driven)
+const remoteSessions = new Map(); // sessionId -> { tabId, windowId }
+
+/**
+ * Handle create_session from MCP server.
+ * Creates a dedicated browser window + tab, returns { tabId, windowId }.
+ */
+async function handleRemoteCreateSession(sessionId, url) {
+  console.log(`[Remote] Creating session: ${sessionId}`, { url });
+  try {
+    const startUrl = url || 'about:blank';
+    const window = await chrome.windows.create({
+      url: startUrl,
+      type: 'normal',
+      focused: false,
+      state: 'normal',
+    });
+
+    const tabId = window.tabs[0].id;
+    const windowId = window.id;
+
+    remoteSessions.set(sessionId, { tabId, windowId });
+
+    // Wait for page to load if URL was provided
+    if (url) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    console.log(`[Remote] Session created: ${sessionId} (tab: ${tabId}, window: ${windowId})`);
+    sendSessionCreated(sessionId, tabId, windowId);
+  } catch (error) {
+    console.error(`[Remote] Create session error:`, error);
+    sendSessionCreated(sessionId, null, null, error.message);
+  }
+}
+
+/**
+ * Handle execute_tool from MCP server.
+ * Calls the existing executeTool() function and sends back the result.
+ */
+async function handleRemoteExecuteTool(sessionId, toolName, toolInput, toolUseId) {
+  console.log(`[Remote] Execute tool: ${toolName} (session: ${sessionId})`);
+  const session = remoteSessions.get(sessionId);
+
+  try {
+    // Build a lightweight mcpSession-like object for executeTool compatibility
+    const mcpSession = session ? {
+      sessionId,
+      windowId: session.windowId,
+      tabId: session.tabId,
+      screenshots: [],
+      cancelled: false,
+    } : null;
+
+    const result = await executeTool(toolName, toolInput, null, mcpSession);
+
+    // Format result as Anthropic content blocks
+    if (result && result.base64Image) {
+      // Screenshot result
+      const mediaType = result.imageFormat === 'jpeg' ? 'image/jpeg' : 'image/png';
+      const textMessage = result.output || (result.imageId ? `Screenshot captured (ID: ${result.imageId})` : 'Screenshot captured');
+
+      // Store screenshot for view_screenshot tool
+      if (result.imageId) {
+        const dataUrl = `data:${mediaType};base64,${result.base64Image}`;
+        capturedScreenshots.set(result.imageId, dataUrl);
+      }
+
+      sendToolResult(sessionId, toolUseId, [
+        { type: 'text', text: textMessage },
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: result.base64Image } },
+      ]);
+    } else {
+      // Text/object result
+      const content = typeof result === 'string' ? result : JSON.stringify(result);
+      sendToolResult(sessionId, toolUseId, content);
+    }
+  } catch (error) {
+    console.error(`[Remote] Tool execution error:`, error);
+    sendToolResult(sessionId, toolUseId, null, error.message);
+  }
+}
+
+/**
+ * Handle close_session from MCP server.
+ * Closes the dedicated window and cleans up.
+ */
+async function handleRemoteCloseSession(sessionId) {
+  console.log(`[Remote] Closing session: ${sessionId}`);
+  const session = remoteSessions.get(sessionId);
+
+  if (session) {
+    try {
+      if (session.tabId) {
+        await detachDebugger(session.tabId).catch(() => {});
+      }
+      // Leave window open so user can review — just clean up tracking
+    } catch (error) {
+      console.error(`[Remote] Close session error:`, error);
+    }
+    remoteSessions.delete(sessionId);
+  }
+
+  sendSessionClosed(sessionId);
+}
+
 // Initialize MCP bridge with callbacks
 initMcpBridge({
   onStartTask: handleMcpStartTask,
   onSendMessage: handleMcpSendMessage,
   onStopTask: handleMcpStopTask,
-  onScreenshot: handleMcpScreenshot
+  onScreenshot: handleMcpScreenshot,
+  onCreateSession: handleRemoteCreateSession,
+  onExecuteTool: handleRemoteExecuteTool,
+  onCloseSession: handleRemoteCloseSession,
 });
 
 // Start polling for MCP commands

@@ -2,9 +2,9 @@
 /**
  * Hanzi in Chrome MCP Server
  *
- * Simple browser automation: send a task, get back the result.
- * The browser agent in the Chrome extension handles everything autonomously.
+ * Drives the agent loop server-side: reads credentials, calls the LLM,
+ * and sends tool execution requests to the Chrome extension.
  *
- * browser_start blocks until the task completes — no polling needed.
+ * The extension is a "remote tool executor" — no native host needed for MCP users.
  */
 export {};

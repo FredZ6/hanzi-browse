@@ -2,10 +2,10 @@
 /**
  * Hanzi in Chrome MCP Server
  *
- * Simple browser automation: send a task, get back the result.
- * The browser agent in the Chrome extension handles everything autonomously.
+ * Drives the agent loop server-side: reads credentials, calls the LLM,
+ * and sends tool execution requests to the Chrome extension.
  *
- * browser_start blocks until the task completes — no polling needed.
+ * The extension is a "remote tool executor" — no native host needed for MCP users.
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -13,129 +13,59 @@ import { CallToolRequestSchema, ListToolsRequestSchema, } from "@modelcontextpro
 import { WebSocketClient } from "./ipc/websocket-client.js";
 import { randomUUID } from "crypto";
 import { exec } from "child_process";
+import { runAgentLoop } from "./agent/loop.js";
+import { describeCredentials, resolveCredentials } from "./llm/credentials.js";
+import { checkAndIncrementUsage, getLicenseStatus } from "./license/manager.js";
 const sessions = new Map();
 const pendingScreenshots = new Map();
-// Max time a task can run before we return (configurable, default 10 minutes)
-// On timeout, MCP returns an error but the browser window stays open.
-// Claude Code can then use browser_message to continue or browser_stop to clean up.
+// Max time a task can run before we return (configurable, default 5 minutes)
 const TASK_TIMEOUT_MS = parseInt(process.env.HANZI_IN_CHROME_TIMEOUT_MS || String(5 * 60 * 1000), 10);
 const MAX_CONCURRENT = parseInt(process.env.HANZI_IN_CHROME_MAX_SESSIONS || "5", 10);
-const LICENSE_KEY = process.env.HANZI_IN_CHROME_LICENSE_KEY || undefined;
 // WebSocket relay connection
 let connection;
-// --- Message handling ---
-async function handleMessage(message) {
-    const { type, sessionId, results, ...data } = message;
-    // Handle get_info requests from extension — return raw context
-    if (type === "mcp_get_info") {
-        const session = sessions.get(sessionId);
-        const response = session?.context
-            ? `Here is the context:\n${session.context}`
-            : `No context available. Check <system-reminder> tags in your conversation.`;
-        await send({ type: "mcp_get_info_response", sessionId, requestId: data.requestId, response });
-        return;
-    }
-    // Handle escalation — agent is pausing to ask the caller a question
-    if (type === "mcp_escalate") {
-        const session = sessions.get(sessionId);
-        if (session && session.status === "running") {
-            session.status = "waiting";
-            session.question = data.whatINeed || data.problem || "The browser agent needs your input.";
-            session.escalateRequestId = data.requestId;
-            console.error(`[MCP] Session ${sessionId} waiting: ${session.question}`);
-            session.resolve?.();
-        }
-        return;
-    }
-    // Handle batch results from polling
-    if (type === "mcp_results" && Array.isArray(results)) {
-        for (const result of results)
-            processResult(result);
-        return;
-    }
-    // Handle single result
-    if (sessionId) {
-        processResult({ type, sessionId, ...data });
-    }
+const pendingWaiters = [];
+/**
+ * Wait for a specific message from the extension via WebSocket relay.
+ * Returns null on timeout.
+ */
+function waitForRelayMessage(filter, timeoutMs = 60000) {
+    return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+            const idx = pendingWaiters.findIndex((w) => w.resolve === resolve);
+            if (idx !== -1)
+                pendingWaiters.splice(idx, 1);
+            resolve(null);
+        }, timeoutMs);
+        pendingWaiters.push({ filter, resolve, timeout });
+    });
 }
-function processResult(result) {
-    const { type, sessionId, ...data } = result;
-    // Handle screenshots for pending requests (not real sessions)
+/**
+ * Route incoming relay messages to pending waiters.
+ */
+async function handleMessage(message) {
+    // Check pending waiters first
+    for (let i = 0; i < pendingWaiters.length; i++) {
+        const waiter = pendingWaiters[i];
+        if (waiter.filter(message)) {
+            clearTimeout(waiter.timeout);
+            pendingWaiters.splice(i, 1);
+            waiter.resolve(message);
+            return;
+        }
+    }
+    // Handle screenshots for pending requests
+    const { type, sessionId, ...data } = message;
     if (type === "screenshot" && data.data && sessionId) {
         const pending = pendingScreenshots.get(sessionId);
         if (pending) {
             clearTimeout(pending.timeout);
             pending.resolve(data.data);
             pendingScreenshots.delete(sessionId);
-            return;
         }
-    }
-    const session = sessions.get(sessionId);
-    if (!session)
-        return;
-    const step = data.step || data.status || data.message;
-    switch (type) {
-        case "task_update":
-            if (step && step !== "thinking" && !step.startsWith("[thinking]")) {
-                session.steps.push(step);
-            }
-            break;
-        case "task_complete":
-            session.status = "complete";
-            session.answer = step || session.steps[session.steps.length - 1];
-            console.error(`[MCP] Session ${sessionId} complete`);
-            session.resolve?.();
-            break;
-        case "task_error":
-            session.status = "error";
-            session.error = data.error || "Unknown error";
-            console.error(`[MCP] Session ${sessionId} error: ${session.error}`);
-            session.resolve?.();
-            break;
-        case "screenshot":
-            if (data.data) {
-                const pending = pendingScreenshots.get(sessionId);
-                if (pending) {
-                    clearTimeout(pending.timeout);
-                    pending.resolve(data.data);
-                    pendingScreenshots.delete(sessionId);
-                }
-            }
-            break;
     }
 }
 async function send(message) {
     await connection.send(message);
-}
-/**
- * Wait for a session to reach a terminal state (complete or error).
- *
- * IMPORTANT: Clears any previous timeout before setting a new one.
- * Without this, a stale timeout from browser_start can fire during
- * browser_message — corrupting the session status and causing the
- * browser_message promise to hang forever.
- */
-function waitForSession(session) {
-    if (session.status !== "running")
-        return Promise.resolve();
-    // Clear any stale timeout from a previous waitForSession call
-    // (e.g., browser_start timeout still pending when browser_message is called)
-    if (session.timeoutId) {
-        clearTimeout(session.timeoutId);
-        session.timeoutId = undefined;
-    }
-    return new Promise((resolve) => {
-        session.resolve = resolve;
-        // Safety timeout — stop the agent but leave the browser window open
-        session.timeoutId = setTimeout(() => {
-            session.timeoutId = undefined;
-            if (session.status === "running") {
-                session.status = "timeout";
-                session.error = `Task still running after ${TASK_TIMEOUT_MS / 60000} minutes. Use browser_screenshot to check progress, then browser_message to continue or browser_stop to end.`;
-                resolve();
-            }
-        }, TASK_TIMEOUT_MS);
-    });
 }
 function formatResult(session) {
     const result = {
@@ -147,8 +77,6 @@ function formatResult(session) {
         result.answer = session.answer;
     if (session.error)
         result.error = session.error;
-    if (session.question && session.status === "waiting")
-        result.question = session.question;
     if (session.steps.length > 0) {
         result.total_steps = session.steps.length;
         result.recent_steps = session.steps.slice(-5);
@@ -207,22 +135,21 @@ WHEN NOT TO USE — always prefer faster tools first:
 Return statuses:
 - "complete" — task succeeded, result in "answer"
 - "error" — task failed. Call browser_screenshot to see the page, then browser_message to retry or browser_stop to clean up.
-- "waiting" — the agent is paused and asking a question (see "question" field). Call browser_message with the answer to resume.
 - "timeout" — the 5-minute window elapsed but the task is still running in the browser. This is normal for long tasks. Call browser_screenshot to check progress, then browser_message to continue or browser_stop to end.`,
         inputSchema: {
             type: "object",
             properties: {
                 task: {
                     type: "string",
-                    description: "What you want done in the browser. Be specific: include the website, the goal, and any details that matter (e.g. 'on linkedin.com, post an article about X' not just 'post something').",
+                    description: "What you want done in the browser. Be specific: include the website, the goal, and any details that matter.",
                 },
                 url: {
                     type: "string",
-                    description: "Starting URL to navigate to before the task begins. If omitted, the agent figures out where to go from the task description.",
+                    description: "Starting URL to navigate to before the task begins.",
                 },
                 context: {
                     type: "string",
-                    description: "All the information the agent might need: form field values, text to paste, tone/style preferences, credentials, choices to make. Dump everything relevant here — the more you provide, the fewer round-trips. Without this, the agent will pause and ask.",
+                    description: "All the information the agent might need: form field values, text to paste, tone/style preferences, credentials, choices to make.",
                 },
             },
             required: ["task"],
@@ -233,12 +160,11 @@ Return statuses:
         description: `Send a follow-up message to a running or finished browser session. Blocks until the agent acts on it.
 
 Use cases:
-- Answer a question: when browser_start returned "waiting", the agent needs info. Pass the answer here.
 - Correct or refine: "actually change the quantity to 3", "use the second address instead"
 - Continue after completion: "now click the Download button", "go to the next page and do the same thing"
 - Retry after error: "try again", "click the other link instead"
 
-The browser window is still open from the original browser_start call, so the agent picks up exactly where it left off. Returns the same statuses as browser_start (complete, error, or waiting).`,
+The browser window is still open from the original browser_start call, so the agent picks up exactly where it left off.`,
         inputSchema: {
             type: "object",
             properties: {
@@ -252,7 +178,7 @@ The browser window is still open from the original browser_start call, so the ag
         name: "browser_status",
         description: `Check the current status of browser sessions.
 
-Returns session ID, status, task description, and the last 5 steps. Useful when a previous browser_start timed out and you want to see if the agent is still making progress, or to list all active sessions before deciding which to message or stop.`,
+Returns session ID, status, task description, and the last 5 steps.`,
         inputSchema: {
             type: "object",
             properties: {
@@ -269,7 +195,7 @@ Without "remove", the session can still be resumed later with browser_message. W
             type: "object",
             properties: {
                 session_id: { type: "string", description: "Session to stop." },
-                remove: { type: "boolean", description: "If true, also close the browser window and delete session history. Cannot be resumed." },
+                remove: { type: "boolean", description: "If true, also close the browser window and delete session history." },
             },
             required: ["session_id"],
         },
@@ -278,7 +204,7 @@ Without "remove", the session can still be resumed later with browser_message. W
         name: "browser_screenshot",
         description: `Capture a screenshot of the current browser page. Returns a PNG image.
 
-Call this when browser_start returns "error" or times out — see what the agent was looking at before deciding whether to retry with browser_message or give up with browser_stop.`,
+Call this when browser_start returns "error" or times out — see what the agent was looking at.`,
         inputSchema: {
             type: "object",
             properties: {
@@ -288,7 +214,7 @@ Call this when browser_start returns "error" or times out — see what the agent
     },
 ];
 // --- MCP Server ---
-const server = new Server({ name: "browser-automation", version: "1.0.0" }, { capabilities: { tools: { listChanged: false } } });
+const server = new Server({ name: "browser-automation", version: "2.0.0" }, { capabilities: { tools: { listChanged: false } } });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
@@ -301,7 +227,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (!task?.trim()) {
                     return { content: [{ type: "text", text: "Error: task cannot be empty" }], isError: true };
                 }
-                // Pre-flight: check if extension is connected before committing to a 5-min wait
+                // Check license / usage limit
+                const usage = await checkAndIncrementUsage();
+                if (!usage.allowed) {
+                    return { content: [{ type: "text", text: usage.message }], isError: true };
+                }
+                console.error(`[MCP] ${usage.message}`);
+                // Check credentials before starting
+                const creds = resolveCredentials();
+                if (!creds) {
+                    return {
+                        content: [{
+                                type: "text",
+                                text: "No LLM credentials found. Set ANTHROPIC_API_KEY env var or run `claude login`.",
+                            }],
+                        isError: true,
+                    };
+                }
+                // Pre-flight: check if extension is connected
                 if (!await isExtensionConnected()) {
                     openInBrowser(EXTENSION_URL);
                     return {
@@ -323,6 +266,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         isError: true,
                     };
                 }
+                const abortController = new AbortController();
                 const session = {
                     id: randomUUID().slice(0, 8),
                     task,
@@ -330,13 +274,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     context,
                     status: "running",
                     steps: [],
+                    abortController,
                 };
                 sessions.set(session.id, session);
-                // Dispatch to browser extension
-                await send({ type: "mcp_start_task", sessionId: session.id, task, url, context, licenseKey: LICENSE_KEY });
-                console.error(`[MCP] Started task ${session.id}: ${task.slice(0, 80)}`);
-                // Block until complete
-                await waitForSession(session);
+                console.error(`[MCP] Starting task ${session.id}: ${task.slice(0, 80)}`);
+                // Run agent loop directly — drives LLM + tool execution
+                const loopPromise = runAgentLoop({
+                    sessionId: session.id,
+                    task,
+                    url,
+                    context,
+                    signal: abortController.signal,
+                    send: (msg) => send(msg),
+                    waitForMessage: (filter) => waitForRelayMessage(filter || (() => true), 120000),
+                    onUpdate: (step) => {
+                        session.steps.push(step);
+                        console.error(`[MCP] ${session.id}: ${step}`);
+                    },
+                });
+                session.loopPromise = loopPromise;
+                // Race: agent loop vs timeout
+                const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), TASK_TIMEOUT_MS));
+                const result = await Promise.race([loopPromise, timeoutPromise]);
+                if (result === null) {
+                    // Timeout — loop is still running
+                    session.status = "timeout";
+                    session.error = `Task still running after ${TASK_TIMEOUT_MS / 60000} minutes. Use browser_screenshot to check progress, then browser_message to continue or browser_stop to end.`;
+                }
+                else {
+                    session.status = result.success ? "complete" : "error";
+                    if (result.success) {
+                        session.answer = result.message;
+                    }
+                    else {
+                        session.error = result.message;
+                    }
+                }
                 return {
                     content: [{ type: "text", text: JSON.stringify(formatResult(session), null, 2) }],
                     isError: session.status === "error",
@@ -352,31 +325,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (!message?.trim()) {
                     return { content: [{ type: "text", text: "Error: message cannot be empty" }], isError: true };
                 }
-                // If the agent is waiting for input (escalation), send the response directly
-                if (session.status === "waiting" && session.escalateRequestId) {
-                    const requestId = session.escalateRequestId;
-                    session.escalateRequestId = undefined;
-                    session.question = undefined;
-                    session.status = "running";
-                    session.answer = undefined;
-                    session.error = undefined;
-                    await send({ type: "mcp_escalate_response", sessionId, requestId, response: message });
-                    console.error(`[MCP] Escalation response sent to ${sessionId}: ${message.slice(0, 80)}`);
+                // For follow-up messages, we restart the agent loop with the new message
+                // appended to the conversation (the previous loop has completed or timed out)
+                const abortController = new AbortController();
+                session.status = "running";
+                session.answer = undefined;
+                session.error = undefined;
+                session.abortController = abortController;
+                console.error(`[MCP] Message to ${sessionId}: ${message.slice(0, 80)}`);
+                // Run a new agent loop with the follow-up message as the task
+                const loopPromise = runAgentLoop({
+                    sessionId: session.id,
+                    task: message,
+                    url: session.url,
+                    context: session.context,
+                    signal: abortController.signal,
+                    send: (msg) => send(msg),
+                    waitForMessage: (filter) => waitForRelayMessage(filter || (() => true), 120000),
+                    onUpdate: (step) => {
+                        session.steps.push(step);
+                        console.error(`[MCP] ${session.id}: ${step}`);
+                    },
+                });
+                session.loopPromise = loopPromise;
+                const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), TASK_TIMEOUT_MS));
+                const result = await Promise.race([loopPromise, timeoutPromise]);
+                if (result === null) {
+                    session.status = "timeout";
+                    session.error = `Task still running after ${TASK_TIMEOUT_MS / 60000} minutes.`;
                 }
                 else {
-                    // Normal follow-up message
-                    session.status = "running";
-                    session.answer = undefined;
-                    session.error = undefined;
-                    await send({ type: "mcp_send_message", sessionId, message });
-                    console.error(`[MCP] Message sent to ${sessionId}: ${message.slice(0, 80)}`);
+                    session.status = result.success ? "complete" : "error";
+                    if (result.success) {
+                        session.answer = result.message;
+                    }
+                    else {
+                        session.error = result.message;
+                    }
                 }
-                // Block until the agent finishes acting on it
-                await waitForSession(session);
-                const msgResult = formatResult(session);
                 return {
-                    content: [{ type: "text", text: JSON.stringify(msgResult, null, 2) }],
-                    isError: msgResult.status !== "complete" && msgResult.status !== "waiting",
+                    content: [{ type: "text", text: JSON.stringify(formatResult(session), null, 2) }],
+                    isError: session.status === "error",
                 };
             }
             case "browser_status": {
@@ -399,18 +388,54 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (!session) {
                     return { content: [{ type: "text", text: `Session not found: ${sessionId}` }], isError: true };
                 }
-                await send({ type: "mcp_stop_task", sessionId, remove: args?.remove === true });
+                // Abort the running agent loop
+                session.abortController?.abort();
+                // Tell extension to close the session
+                await send({ type: "mcp_close_session", sessionId });
                 if (args?.remove) {
                     sessions.delete(sessionId);
                     return { content: [{ type: "text", text: `Session ${sessionId} removed.` }] };
                 }
                 session.status = "stopped";
-                session.resolve?.();
                 return { content: [{ type: "text", text: `Session ${sessionId} stopped.` }] };
             }
             case "browser_screenshot": {
                 const sessionId = args?.session_id;
+                // Send execute_tool for screenshot via the remote executor
                 const requestId = sessionId || `screenshot-${Date.now()}`;
+                const toolUseId = `screenshot_${Date.now()}`;
+                await send({
+                    type: "mcp_execute_tool",
+                    sessionId: requestId,
+                    toolName: "computer",
+                    toolInput: { action: "screenshot" },
+                    toolUseId,
+                });
+                // Wait for tool_result with the screenshot
+                const result = await waitForRelayMessage((msg) => msg.type === "tool_result" && msg.toolUseId === toolUseId, 10000);
+                if (result?.content) {
+                    // Extract base64 image from content blocks
+                    const content = Array.isArray(result.content) ? result.content : [];
+                    const imageBlock = content.find((b) => b.type === "image");
+                    if (imageBlock?.source?.data) {
+                        return {
+                            content: [
+                                { type: "image", data: imageBlock.source.data, mimeType: imageBlock.source.media_type || "image/png" },
+                                { type: "text", text: "Screenshot of current browser state" },
+                            ],
+                        };
+                    }
+                    // Fallback: content might be a string with base64 data
+                    if (typeof result.content === "string" && result.content.length > 1000) {
+                        return {
+                            content: [
+                                { type: "image", data: result.content, mimeType: "image/png" },
+                                { type: "text", text: "Screenshot of current browser state" },
+                            ],
+                        };
+                    }
+                }
+                // Fallback to the old screenshot mechanism
                 const screenshotPromise = new Promise((resolve) => {
                     const timeout = setTimeout(() => {
                         pendingScreenshots.delete(requestId);
@@ -440,7 +465,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 // --- Startup ---
 async function main() {
-    console.error("[MCP] Starting...");
+    console.error("[MCP] Starting Hanzi in Chrome MCP Server v2.0...");
+    // Startup diagnostics
+    const credDesc = describeCredentials();
+    console.error(`[MCP] Credentials: ${credDesc}`);
+    const licenseStatus = getLicenseStatus();
+    console.error(`[MCP] License: ${licenseStatus.message}`);
     connection = new WebSocketClient({
         role: "mcp",
         autoStartRelay: true,
@@ -449,14 +479,13 @@ async function main() {
     connection.onMessage(handleMessage);
     await connection.connect();
     console.error("[MCP] Connected to relay");
-    // Onboarding diagnostics — check if the Chrome extension is connected
+    // Extension connectivity check
     try {
         if (await isExtensionConnected()) {
             console.error("[MCP] Extension connected — ready for tasks");
         }
         else {
-            console.error("[MCP] Extension not connected — opening install page...");
-            openInBrowser(EXTENSION_URL);
+            console.error("[MCP] Extension not connected — install from Chrome Web Store and enable it");
         }
     }
     catch {
@@ -464,7 +493,7 @@ async function main() {
     }
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("[MCP] Server running");
+    console.error("[MCP] Server running (agent loop: server-side)");
 }
 main().catch((error) => {
     console.error("[MCP] Fatal:", error);

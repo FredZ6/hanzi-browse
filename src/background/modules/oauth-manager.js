@@ -16,6 +16,8 @@ const OAUTH_CONFIG = {
   redirectUri: 'http://127.0.0.1:8080/callback'
 };
 
+import { relayRequest, isRelayConnected } from './mcp-bridge.js';
+
 const NATIVE_HOST_NAME = 'com.hanzi_in_chrome.oauth_host';
 
 /**
@@ -63,8 +65,71 @@ async function sha256(plain) {
 export async function importCLICredentials() {
   console.log('[OAuth] ===== Importing Claude CLI Credentials =====');
   console.log('[OAuth] This reads tokens from ~/.claude/.credentials.json');
-  console.log('[OAuth] (Same approach as ccproxy)');
 
+  // Try relay first (no native host needed), then fall back to native host
+  try {
+    const result = await importCLIViaRelay();
+    return result;
+  } catch (relayErr) {
+    console.log('[OAuth] Relay not available, trying native host:', relayErr.message);
+  }
+
+  return importCLIViaNativeHost();
+}
+
+/**
+ * Read Claude credentials via WebSocket relay server.
+ * The relay is a Node.js process that reads local credential files directly.
+ */
+async function importCLIViaRelay() {
+  if (!isRelayConnected()) {
+    throw new Error('Relay not connected');
+  }
+
+  console.log('[OAuth] Reading credentials via relay...');
+  const response = await relayRequest(
+    { type: 'read_credentials', credentialType: 'claude' },
+    'credentials_result',
+    10000
+  );
+
+  if (response.error) {
+    throw new Error(response.error);
+  }
+
+  if (!response.credentials?.accessToken) {
+    throw new Error('No accessToken in relay response');
+  }
+
+  const { accessToken, refreshToken, expiresAt } = response.credentials;
+  console.log('[OAuth] ✓ Credentials received via relay');
+  console.log('[OAuth] Access token:', accessToken.substring(0, 20) + '...');
+
+  // Handle expiresAt
+  let expiresAtTimestamp = null;
+  if (expiresAt) {
+    expiresAtTimestamp = typeof expiresAt === 'number' ? expiresAt : new Date(expiresAt).getTime();
+  }
+
+  // Save credentials to storage
+  await chrome.storage.local.set({
+    oauthAccessToken: accessToken,
+    oauthRefreshToken: refreshToken,
+    oauthExpiresAt: expiresAtTimestamp,
+    oauthTokenType: 'Bearer',
+    authMethod: 'oauth',
+    oauthState: 'authenticated',
+    tokenSource: 'claude_cli'
+  });
+
+  console.log('[OAuth] ✓ Credentials saved to storage');
+  return { accessToken, refreshToken, expiresAt: expiresAtTimestamp };
+}
+
+/**
+ * Read Claude credentials via native messaging host (legacy path).
+ */
+function importCLIViaNativeHost() {
   return new Promise((resolve, reject) => {
     let port = null;
 
