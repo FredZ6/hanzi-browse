@@ -2,7 +2,7 @@
   "name": "hanzi-in-chrome",
   "version": "1.0.0",
   "description": "Open-source browser automation powered by any LLM",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "author": "hanzili",
   "repository": {
     "type": "git",
@@ -38,6 +38,8 @@
     "knip": "^5.0.0",
     "madge": "^6.1.0",
     "prettier": "^3.2.5",
-    "vite": "^5.0.12"
+    "vite": "^5.0.12",
+    "@tavily/core": "^0.6.0",
+    "@anthropic-ai/sdk": "^0.39.0"
   }
 }
