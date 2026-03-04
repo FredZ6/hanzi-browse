@@ -100,7 +100,7 @@ export async function checkAndIncrementUsage() {
                 `You've used all ${FREE_TASK_LIMIT} free tasks.`,
                 ``,
                 `Upgrade to Pro ($29 one-time) for unlimited tasks:`,
-                `  Buy: https://hanziinchrome.lemonsqueezy.com/checkout/buy/5f9be29a-b862-43bf-a440-b4a3cdc9b28e`,
+                `  Buy: https://hanziinchrome.lemonsqueezy.com/checkout/buy/14a16cd3-47d7-42c9-a870-b44aa070cc44`,
                 `  Then set HANZI_IN_CHROME_LICENSE_KEY=<your-key> in your environment.`,
             ].join("\n"),
         };

@@ -1639,7 +1639,7 @@ function LicenseTab() {
       /* @__PURE__ */ u$1(
         "a",
         {
-          href: "https://hanziinchrome.lemonsqueezy.com/checkout/buy/5f9be29a-b862-43bf-a440-b4a3cdc9b28e",
+          href: "https://hanziinchrome.lemonsqueezy.com/checkout/buy/14a16cd3-47d7-42c9-a870-b44aa070cc44",
           target: "_blank",
           class: "btn btn-primary",
           style: { display: "inline-block", textDecoration: "none", marginBottom: "12px" },

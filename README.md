@@ -121,7 +121,7 @@ browser_message(session_id, "Apply to the first one using my profile")
 
 **Free:** 100 tasks, no credit card needed.
 
-**Pro:** $29 one-time for unlimited tasks. **[Buy Pro](https://hanziinchrome.lemonsqueezy.com/checkout/buy/5f9be29a-b862-43bf-a440-b4a3cdc9b28e)**
+**Pro:** $29 one-time for unlimited tasks. **[Buy Pro](https://hanziinchrome.lemonsqueezy.com/checkout/buy/14a16cd3-47d7-42c9-a870-b44aa070cc44)**
 
 After purchasing, set your license key:
 ```bash
