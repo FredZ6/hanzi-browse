@@ -10,6 +10,7 @@ export function InputArea({
   hasModels,
   suggestedText,
   onClearSuggestion,
+  onOpenSettings,
 }) {
   const [text, setText] = useState('');
 
@@ -26,7 +27,7 @@ export function InputArea({
   const handleSubmit = () => {
     if (!text.trim() || isRunning) return;
     if (!hasModels) {
-      alert('Please configure a model in Settings first');
+      if (onOpenSettings) onOpenSettings();
       return;
     }
     onSend(text);

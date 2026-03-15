@@ -15,8 +15,10 @@ let config = {
   apiBaseUrl: 'http://127.0.0.1:8000/claude/v1/messages',
   apiKey: null,
   model: 'claude-sonnet-4-20250514',
+  provider: 'anthropic',
   maxTokens: 10000,
   maxSteps: 0,
+  agentDefaultConfig: null,
 };
 
 // Abort controller for cancellation
@@ -34,7 +36,8 @@ let nativeHostPort = null;
 export async function loadConfig() {
   const stored = await chrome.storage.local.get([
     'apiBaseUrl', 'apiKey', 'model', 'maxSteps', 'maxTokens',
-    'providerKeys', 'customModels', 'currentModelIndex', 'userSkills', 'authMethod'
+    'providerKeys', 'customModels', 'currentModelIndex', 'userSkills', 'authMethod',
+    'provider', 'agentDefaultConfig'
   ]);
   config = { ...config, ...stored };
 
@@ -59,20 +62,104 @@ export function setConfig(newConfig) {
   config = { ...config, ...newConfig };
 }
 
+function getProviderName(callConfig) {
+  return createProvider(callConfig.apiBaseUrl || '', callConfig).getName();
+}
+
+function resolveConfigWithTier(baseConfig, modelTier) {
+  const providerName = getProviderName(baseConfig);
+
+  if (!modelTier) {
+    return baseConfig;
+  }
+
+  if (providerName === 'anthropic' && MODEL_TIER_MAP[modelTier]) {
+    return { ...baseConfig, model: MODEL_TIER_MAP[modelTier] };
+  }
+
+  if (providerName === 'codex' && CODEX_MODEL_TIER_MAP[modelTier]) {
+    return { ...baseConfig, model: CODEX_MODEL_TIER_MAP[modelTier] };
+  }
+
+  return baseConfig;
+}
+
+export function resolveAgentDefaultConfig(baseConfig = config) {
+  if (baseConfig?.agentDefaultConfig?.model && baseConfig?.agentDefaultConfig?.apiBaseUrl) {
+    return { ...baseConfig.agentDefaultConfig };
+  }
+
+  const providerName = getProviderName(baseConfig);
+  const authMethod = baseConfig.authMethod;
+
+  if (providerName === 'anthropic') {
+    return {
+      provider: 'anthropic',
+      model: MODEL_TIER_MAP.fast,
+      apiBaseUrl: baseConfig.apiBaseUrl,
+      apiKey: baseConfig.apiKey,
+      authMethod,
+      name: 'haiku 4.5',
+    };
+  }
+
+  if (providerName === 'codex') {
+    return {
+      provider: 'codex',
+      model: CODEX_MODEL_TIER_MAP.fast,
+      apiBaseUrl: baseConfig.apiBaseUrl,
+      apiKey: baseConfig.apiKey,
+      authMethod,
+      name: 'gpt-5.1 codex',
+    };
+  }
+
+  if (providerName === 'google') {
+    return {
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      apiBaseUrl: baseConfig.apiBaseUrl,
+      apiKey: baseConfig.apiKey,
+      authMethod,
+      name: 'gemini 2.5 flash',
+    };
+  }
+
+  if (providerName === 'openrouter') {
+    return {
+      provider: 'openrouter',
+      model: 'qwen/qwen3-vl-235b-a22b-thinking',
+      apiBaseUrl: baseConfig.apiBaseUrl,
+      apiKey: baseConfig.apiKey,
+      authMethod,
+      name: 'qwen3 vl 235b',
+    };
+  }
+
+  return {
+    provider: baseConfig.provider || 'openai',
+    model: baseConfig.model,
+    apiBaseUrl: baseConfig.apiBaseUrl,
+    apiKey: baseConfig.apiKey,
+    authMethod,
+    name: baseConfig.model,
+  };
+}
+
 /**
  * Get API headers based on the provider endpoint and auth method
  * Supports both OAuth tokens and API keys
  */
-export async function getApiHeaders() {
+async function getApiHeadersForConfig(callConfig) {
   // Create provider to get base headers (Anthropic-specific headers, etc.)
-  const provider = createProvider(config.apiBaseUrl || '', config);
+  const provider = createProvider(callConfig.apiBaseUrl || '', callConfig);
   const providerHeaders = await provider.getHeaders();
 
   // OAuth only applies to Anthropic - don't add OAuth headers to other providers
-  const isAnthropic = config.apiBaseUrl?.includes('anthropic.com');
+  const isAnthropic = provider.getName() === 'anthropic';
 
   // Check if using OAuth authentication (only for Anthropic)
-  if (isAnthropic && config.authMethod === 'oauth') {
+  if (isAnthropic && callConfig.authMethod === 'oauth') {
     const accessToken = await getAccessToken();
 
     if (accessToken) {
@@ -93,6 +180,10 @@ export async function getApiHeaders() {
 
   // Use API key (provider-based)
   return providerHeaders;
+}
+
+export async function getApiHeaders() {
+  return getApiHeadersForConfig(config);
 }
 
 /**
@@ -162,6 +253,10 @@ const CODEX_MODEL_TIER_MAP = {
   powerful: 'gpt-5.1-codex-max',          // Best quality - complex reasoning
 };
 
+function buildEffectiveConfig(overrides = {}) {
+  return { ...config, ...overrides };
+}
+
 /**
  * Simple LLM API call (for quick tasks like summarization, find tool, etc.)
  * Routes through native host to use keychain credentials (same as streaming API).
@@ -183,6 +278,7 @@ export async function callLLMSimple(promptOrOptions, maxTokensArg = 800) {
   let maxTokens;
   let modelTier;
   let returnFullResponse = false;
+  let configOverride;
 
   let system;
 
@@ -192,6 +288,7 @@ export async function callLLMSimple(promptOrOptions, maxTokensArg = 800) {
     maxTokens = promptOrOptions.maxTokens || 800;
     modelTier = promptOrOptions.modelTier;
     system = promptOrOptions.system;
+    configOverride = promptOrOptions.configOverride;
     returnFullResponse = true;
   } else {
     // Legacy signature: (prompt, maxTokens)
@@ -199,49 +296,64 @@ export async function callLLMSimple(promptOrOptions, maxTokensArg = 800) {
     maxTokens = maxTokensArg;
   }
 
-  // Determine which model to use
-  // This function always routes through the Anthropic API (via native host),
-  // so we must use a Claude model. If the user configured a non-Claude model
-  // (e.g., gpt-5.1-codex), fall back to haiku.
-  const isClaudeModel = config.model?.startsWith('claude-');
-  const modelToUse = modelTier && MODEL_TIER_MAP[modelTier]
-    ? MODEL_TIER_MAP[modelTier]
-    : isClaudeModel ? config.model : MODEL_TIER_MAP.fast;
+  let effectiveConfig = buildEffectiveConfig(configOverride || {});
+  effectiveConfig = resolveConfigWithTier(effectiveConfig, modelTier);
+  const provider = createProvider(effectiveConfig.apiBaseUrl || '', effectiveConfig);
+  const providerName = provider.getName();
+  const useAnthropicOAuth = providerName === 'anthropic' && effectiveConfig.authMethod === 'oauth';
+  const useCodexOAuth = providerName === 'codex' && effectiveConfig.authMethod === 'codex_oauth';
 
   if (modelTier) {
-    console.log(`[API] callLLMSimple: Using model tier "${modelTier}" → ${modelToUse}`);
+    console.log(`[API] callLLMSimple: Using model tier "${modelTier}" → ${effectiveConfig.model}`);
   }
 
-  // Claude Code credentials require streaming requests (non-streaming gets rejected)
-  const useStreaming = config.authMethod === 'oauth';
+  const systemPrompt = system || 'You are a helpful assistant. Be concise and direct in your responses.';
 
-  const requestBody = {
-    model: modelToUse,
-    max_tokens: maxTokens,
-    messages: messages,
-    ...(system ? { system } : {}),
-    stream: useStreaming,
-  };
+  if (useCodexOAuth) {
+    const result = await provider.call(messages, systemPrompt, [], null, () => {});
+    if (returnFullResponse) {
+      return result;
+    }
+    return result.content?.find(b => b.type === 'text')?.text || '';
+  }
 
-  // Use Anthropic API directly (native host will add credentials from keychain)
-  const apiUrl = 'https://api.anthropic.com/v1/messages';
+  if (useAnthropicOAuth) {
+    const requestBody = provider.buildRequestBody(messages, systemPrompt, [], true);
+    const apiUrl = provider.buildUrl(true);
 
-  // Route through relay proxy first (no native host needed), fall back to native host
-  let result;
-  if (isRelayConnected()) {
-    try {
-      console.log('[API] callLLMSimple: Routing through relay proxy');
-      result = await callLLMSimpleViaRelayProxy(apiUrl, requestBody);
-    } catch (relayErr) {
-      console.log('[API] callLLMSimple: Relay failed, trying native host:', relayErr.message);
+    let result;
+    if (isRelayConnected()) {
+      try {
+        console.log('[API] callLLMSimple: Routing through relay proxy');
+        result = await callLLMSimpleViaRelayProxy(apiUrl, requestBody);
+      } catch (relayErr) {
+        console.log('[API] callLLMSimple: Relay failed, trying native host:', relayErr.message);
+        result = await callLLMSimpleViaProxy(apiUrl, requestBody);
+      }
+    } else {
+      console.log('[API] callLLMSimple: Routing through native host');
       result = await callLLMSimpleViaProxy(apiUrl, requestBody);
     }
-  } else {
-    console.log(`[API] callLLMSimple: Routing through native host (streaming: ${useStreaming})`);
-    result = await callLLMSimpleViaProxy(apiUrl, requestBody);
+
+    if (returnFullResponse) {
+      return result;
+    }
+    return result.content?.find(b => b.type === 'text')?.text || '';
   }
 
-  // Return full response for messages-based calls, just text for simple prompts
+  const requestBody = provider.buildRequestBody(messages, systemPrompt, [], false);
+  const apiUrl = provider.buildUrl(false);
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: await getApiHeadersForConfig(effectiveConfig),
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    throw new Error(parseErrorResponse(await response.text(), response.status));
+  }
+
+  const result = provider.normalizeResponse(await response.json());
   if (returnFullResponse) {
     return result;
   }
@@ -377,8 +489,8 @@ function getNativeHostPort() {
  * Used for the main agent loop (callLLM) with OAuth credentials.
  * @private
  */
-async function callLLMThroughRelayProxy(messages, onTextChunk = null, log = () => {}, currentUrl = null) {
-  const provider = createProvider(config.apiBaseUrl || '', config);
+async function callLLMThroughRelayProxy(messages, onTextChunk = null, log = () => {}, currentUrl = null, callConfig = config) {
+  const provider = createProvider(callConfig.apiBaseUrl || '', callConfig);
   const isClaudeModel = provider.getName() === 'anthropic';
   const systemPrompt = buildSystemPrompt({ isClaudeModel });
   const tools = getToolsForUrl(currentUrl);
@@ -439,8 +551,8 @@ async function callLLMThroughRelayProxy(messages, onTextChunk = null, log = () =
   await proxyApiCall(apiUrl, requestBodyStr, onChunk);
 
   const duration = Date.now() - startTime;
-  await log('API', `#${callNumber} ${config.model} → ${streamResult.stop_reason} (relay)`, {
-    model: config.model,
+  await log('API', `#${callNumber} ${callConfig.model} → ${streamResult.stop_reason} (relay)`, {
+    model: callConfig.model,
     messages: messages.length,
     stopReason: streamResult.stop_reason,
     tokens: streamResult.usage,
@@ -485,12 +597,12 @@ async function callLLMSimpleViaRelayProxy(apiUrl, requestBody) {
  * Includes automatic retry on stream stalls
  * @private
  */
-async function callLLMThroughProxy(messages, onTextChunk = null, log = () => {}, currentUrl = null) {
+async function callLLMThroughProxy(messages, onTextChunk = null, log = () => {}, currentUrl = null, callConfig = config) {
   const MAX_RETRIES = 2;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
-      return await callLLMThroughProxyOnce(messages, onTextChunk, log, currentUrl);
+      return await callLLMThroughProxyOnce(messages, onTextChunk, log, currentUrl, callConfig);
     } catch (err) {
       const isRetryable = err.message.includes('Stream stalled') ||
                           err.message.includes('timed out') ||
@@ -510,8 +622,8 @@ async function callLLMThroughProxy(messages, onTextChunk = null, log = () => {},
  * Single attempt at making API call through proxy
  * @private
  */
-async function callLLMThroughProxyOnce(messages, onTextChunk = null, log = () => {}, currentUrl = null) {
-  const provider = createProvider(config.apiBaseUrl || '', config);
+async function callLLMThroughProxyOnce(messages, onTextChunk = null, log = () => {}, currentUrl = null, callConfig = config) {
+  const provider = createProvider(callConfig.apiBaseUrl || '', callConfig);
   const isClaudeModel = provider.getName() === 'anthropic';
   const systemPrompt = buildSystemPrompt({ isClaudeModel });
   const useStreaming = onTextChunk !== null;
@@ -589,8 +701,8 @@ async function callLLMThroughProxyOnce(messages, onTextChunk = null, log = () =>
         port.onMessage.removeListener(messageListener);
         const duration = Date.now() - startTime;
 
-        await log('API', `#${callNumber} ${config.model} → ${streamResult.stop_reason}`, {
-          model: config.model,
+        await log('API', `#${callNumber} ${callConfig.model} → ${streamResult.stop_reason}`, {
+          model: callConfig.model,
           messages: messages.length,
           stopReason: streamResult.stop_reason,
           tokens: streamResult.usage,
@@ -611,8 +723,8 @@ async function callLLMThroughProxyOnce(messages, onTextChunk = null, log = () =>
           const result = JSON.parse(message.body);
           const duration = Date.now() - startTime;
 
-          await log('API', `#${callNumber} ${config.model} → ${result.stop_reason}`, {
-            model: config.model,
+          await log('API', `#${callNumber} ${callConfig.model} → ${result.stop_reason}`, {
+            model: callConfig.model,
             messages: messages.length,
             stopReason: result.stop_reason,
             tokens: result.usage,
@@ -959,19 +1071,24 @@ function normalizeCodexResponse(response) {
  * @param {string|null} currentUrl - Current tab URL (used to filter domain-specific tools)
  * @param {AbortSignal|null} externalSignal - Optional abort signal (e.g., per-session abort for MCP tasks)
  */
-export async function callLLM(messages, onTextChunk = null, log = () => {}, currentUrl = null, externalSignal = null) {
+export async function callLLM(messages, onTextChunk = null, log = () => {}, currentUrl = null, externalSignal = null, options = {}) {
   await loadConfig();
+
+  const effectiveConfig = buildEffectiveConfig({
+    ...(options.configOverride || {}),
+    ...(options.modelOverride ? { model: options.modelOverride } : {}),
+  });
 
   // Debug: log config values
   console.log('[API] Config loaded:', {
-    apiBaseUrl: config.apiBaseUrl,
-    model: config.model,
-    hasApiKey: !!config.apiKey,
-    apiKeyPrefix: config.apiKey ? config.apiKey.substring(0, 10) + '...' : 'none',
+    apiBaseUrl: effectiveConfig.apiBaseUrl,
+    model: effectiveConfig.model,
+    hasApiKey: !!effectiveConfig.apiKey,
+    apiKeyPrefix: effectiveConfig.apiKey ? effectiveConfig.apiKey.substring(0, 10) + '...' : 'none',
   });
 
   // Create provider instance
-  const provider = createProvider(config.apiBaseUrl || '', config);
+  const provider = createProvider(effectiveConfig.apiBaseUrl || '', effectiveConfig);
   const useStreaming = onTextChunk !== null;
   const signal = externalSignal || abortController?.signal;
   const isClaudeModel = provider.getName() === 'anthropic';
@@ -987,28 +1104,28 @@ export async function callLLM(messages, onTextChunk = null, log = () => {}, curr
 
   // OAuth calls require Claude Code impersonation headers (user-agent, x-app: cli)
   // that browsers can't set due to CORS. Route through relay proxy (or native host fallback).
-  if (apiUrl.includes('api.anthropic.com') && config.authMethod === 'oauth') {
+  if (apiUrl.includes('api.anthropic.com') && effectiveConfig.authMethod === 'oauth') {
     try {
-      return await callLLMThroughRelayProxy(messages, onTextChunk, log, currentUrl);
+      return await callLLMThroughRelayProxy(messages, onTextChunk, log, currentUrl, effectiveConfig);
     } catch (relayErr) {
       console.log('[API] Relay proxy failed, trying native host:', relayErr.message);
-      return await callLLMThroughProxy(messages, onTextChunk, log, currentUrl);
+      return await callLLMThroughProxy(messages, onTextChunk, log, currentUrl, effectiveConfig);
     }
   }
 
   // If calling Codex API (ChatGPT backend), use the provider's native messaging call
   // CodexProvider has its own call() method that handles native messaging with OpenAI SSE format
   // Falls back to ccproxy if Codex subscription is expired (429)
-  if (apiUrl.includes('chatgpt.com') && config.authMethod === 'codex_oauth') {
+  if (apiUrl.includes('chatgpt.com') && effectiveConfig.authMethod === 'codex_oauth') {
     try {
       return await provider.call(messages, systemPrompt, tools, onTextChunk, log);
     } catch (e) {
       if (e.message.includes('429') || e.message.includes('usage_limit')) {
         console.log('[API] Codex limit reached, falling back to ccproxy');
         // Switch to ccproxy for the rest of this session (in-memory only)
-        config.apiBaseUrl = 'http://127.0.0.1:8000/claude/v1/messages';
-        config.authMethod = '';
-        config.model = 'claude-haiku-4-5-20251001';
+        effectiveConfig.apiBaseUrl = 'http://127.0.0.1:8000/claude/v1/messages';
+        effectiveConfig.authMethod = '';
+        effectiveConfig.model = MODEL_TIER_MAP.fast;
         // Fall through to direct fetch below with ccproxy URL
       } else {
         throw e;
@@ -1017,7 +1134,7 @@ export async function callLLM(messages, onTextChunk = null, log = () => {}, curr
   }
 
   // Rebuild provider/request if config was changed by Codex fallback
-  const activeProvider = createProvider(config.apiBaseUrl || '', config);
+  const activeProvider = createProvider(effectiveConfig.apiBaseUrl || '', effectiveConfig);
   const activeIsClaudeModel = activeProvider.getName() === 'anthropic';
   const activeSystemPrompt = buildSystemPrompt({ isClaudeModel: activeIsClaudeModel });
   const activeTools = getToolsForUrl(currentUrl);
@@ -1049,11 +1166,11 @@ export async function callLLM(messages, onTextChunk = null, log = () => {}, curr
     const callNumber = apiCallCounter;
     const startTime = Date.now();
 
-    let headers = await getApiHeaders();
+    let headers = await getApiHeadersForConfig(effectiveConfig);
     let response = await makeRequest(headers);
 
     // Handle 401 - try refreshing OAuth token and retry once
-    if (response.status === 401 && config.authMethod === 'oauth') {
+    if (response.status === 401 && effectiveConfig.authMethod === 'oauth') {
       console.log('[API] callLLM got 401, attempting token refresh...');
       let refreshFailed = false;
       let refreshErrorMsg = null;
@@ -1066,7 +1183,7 @@ export async function callLLM(messages, onTextChunk = null, log = () => {}, curr
             oauthRefreshToken: tokens.refreshToken,
             oauthExpiresAt: Date.now() + (tokens.expiresIn * 1000)
           });
-          headers = await getApiHeaders();
+          headers = await getApiHeadersForConfig(effectiveConfig);
           response = await makeRequest(headers);
           console.log('[API] Token refresh successful, retried request');
         } else {

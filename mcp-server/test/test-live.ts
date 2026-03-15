@@ -1,7 +1,7 @@
 /**
  * Live Agent Tests (requires extension to be running)
  *
- * These tests actually call the LLM through the extension.
+ * These tests exercise legacy native-host backed utility flows.
  * Run with: npx tsx test/test-live.ts
  *
  * Prerequisites:
@@ -181,77 +181,9 @@ async function testNativeHostConnection(): Promise<boolean> {
 
 async function testLLMThroughExtension(): Promise<boolean> {
   logSection('TEST: LLM Request Through Extension');
-
-  const nativeHostPath = findNativeHost();
-  if (!nativeHostPath) {
-    log('FAIL', 'Native host not found');
-    return false;
-  }
-
-  try {
-    // Step 1: Send LLM request to native host (which queues it for extension)
-    log('INFO', 'Queueing LLM request...');
-
-    const requestId = `test-${Date.now()}`;
-    await sendToNativeHost(nativeHostPath, {
-      type: 'llm_request',
-      requestId,
-      prompt: 'What is 2 + 2? Reply with just the number.',
-      systemPrompt: 'You are a helpful assistant. Be very brief.',
-      maxTokens: 50,
-      modelTier: 'fast',
-    });
-
-    log('INFO', `Request queued with ID: ${requestId}`);
-    log('WARN', 'To complete this test, the Chrome extension must be running and polling.');
-    log('INFO', 'Waiting for response (checking outbox every second for 30 seconds)...');
-
-    // Step 2: Poll for response
-    const MCP_OUTBOX = path.join(os.homedir(), '.hanzi-in-chrome', 'mcp-outbox.json');
-
-    for (let i = 0; i < 30; i++) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      if (fs.existsSync(MCP_OUTBOX)) {
-        try {
-          const content = fs.readFileSync(MCP_OUTBOX, 'utf8');
-          const results = JSON.parse(content);
-
-          for (const result of results) {
-            if (result.type === 'mcp_llm_response' && result.requestId === requestId) {
-              log('LLM', 'Got LLM response!', {
-                content: result.content,
-                usage: result.usage,
-              });
-
-              if (result.error) {
-                log('FAIL', `LLM returned error: ${result.error}`);
-                return false;
-              }
-
-              if (result.content) {
-                log('PASS', `LLM responded: "${result.content.trim()}"`);
-                return true;
-              }
-            }
-          }
-        } catch {
-          // File being written, try again
-        }
-      }
-
-      process.stdout.write('.');
-    }
-
-    console.log('');
-    log('FAIL', 'Timeout waiting for LLM response');
-    log('INFO', 'Make sure the Chrome extension is running and has a valid API key configured.');
-    return false;
-
-  } catch (error: any) {
-    log('FAIL', 'Test failed', { error: error.message });
-    return false;
-  }
+  log('WARN', 'Skipped: this legacy test depended on native-host file queueing, which is no longer used for MCP task traffic.');
+  log('INFO', 'Use relay-backed MCP integration tests instead.');
+  return true;
 }
 
 async function testPlanningAgentWithLLM(): Promise<boolean> {

@@ -22,13 +22,7 @@ let sessionStats = {
 };
 
 // Per-task usage (reset per task)
-let currentTaskUsage = {
-  inputTokens: 0,
-  outputTokens: 0,
-  cacheCreationTokens: 0,
-  cacheReadTokens: 0,
-  apiCalls: 0,
-};
+let currentTaskUsage = new Map();
 
 // Pricing per 1M tokens (USD) - Jan 2025 rates
 const PRICING = {
@@ -41,6 +35,28 @@ const PRICING = {
   'claude-3-5-haiku-20241022': { input: 1, output: 5 },
   'default': { input: 3, output: 15 },
 };
+
+function createEmptyTaskUsage() {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    apiCalls: 0,
+  };
+}
+
+function getTaskScope(sessionId) {
+  return sessionId || 'default';
+}
+
+function getOrCreateTaskUsage(sessionId) {
+  const scope = getTaskScope(sessionId);
+  if (!currentTaskUsage.has(scope)) {
+    currentTaskUsage.set(scope, createEmptyTaskUsage());
+  }
+  return currentTaskUsage.get(scope);
+}
 
 /**
  * Start a new tracking session
@@ -56,20 +72,15 @@ export function startSession() {
     totalCacheReadTokens: 0,
     apiCalls: 0,
   };
+  currentTaskUsage = new Map();
   resetTaskUsage();
 }
 
 /**
  * Reset per-task usage counters
  */
-export function resetTaskUsage() {
-  currentTaskUsage = {
-    inputTokens: 0,
-    outputTokens: 0,
-    cacheCreationTokens: 0,
-    cacheReadTokens: 0,
-    apiCalls: 0,
-  };
+export function resetTaskUsage(sessionId = null) {
+  currentTaskUsage.set(getTaskScope(sessionId), createEmptyTaskUsage());
 }
 
 /**
@@ -80,7 +91,7 @@ export function resetTaskUsage() {
  * @param {number} [usage.cache_creation_input_tokens] - Tokens for cache creation
  * @param {number} [usage.cache_read_input_tokens] - Tokens read from cache
  */
-export function recordApiCall(usage) {
+export function recordApiCall(usage, sessionId = null) {
   if (!usage) return;
 
   const input = usage.input_tokens || 0;
@@ -89,11 +100,12 @@ export function recordApiCall(usage) {
   const cacheRead = usage.cache_read_input_tokens || 0;
 
   // Update current task
-  currentTaskUsage.inputTokens += input;
-  currentTaskUsage.outputTokens += output;
-  currentTaskUsage.cacheCreationTokens += cacheCreation;
-  currentTaskUsage.cacheReadTokens += cacheRead;
-  currentTaskUsage.apiCalls++;
+  const taskUsage = getOrCreateTaskUsage(sessionId);
+  taskUsage.inputTokens += input;
+  taskUsage.outputTokens += output;
+  taskUsage.cacheCreationTokens += cacheCreation;
+  taskUsage.cacheReadTokens += cacheRead;
+  taskUsage.apiCalls++;
 
   // Update session totals
   sessionStats.totalInputTokens += input;
@@ -118,8 +130,8 @@ export function recordTaskCompletion(success) {
 /**
  * Get current task usage
  */
-export function getTaskUsage() {
-  return { ...currentTaskUsage };
+export function getTaskUsage(sessionId = null) {
+  return { ...getOrCreateTaskUsage(sessionId) };
 }
 
 /**

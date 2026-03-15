@@ -1,16 +1,44 @@
 import { useState, useEffect, useCallback } from 'preact/hooks';
 import { PROVIDERS, CODEX_MODELS } from '../config/providers';
 
+function serializeModelConfig(model) {
+  if (!model) return null;
+
+  return {
+    name: model.name,
+    provider: model.provider,
+    model: model.modelId,
+    apiBaseUrl: model.baseUrl,
+    apiKey: model.apiKey,
+    authMethod: model.authMethod,
+  };
+}
+
+function findModelIndex(models, selection) {
+  if (!selection || !selection.model || !selection.apiBaseUrl) {
+    return -1;
+  }
+
+  return models.findIndex(model =>
+    model.modelId === selection.model &&
+    model.baseUrl === selection.apiBaseUrl &&
+    model.authMethod === selection.authMethod &&
+    model.provider === selection.provider
+  );
+}
+
 export function useConfig() {
   const [providerKeys, setProviderKeys] = useState({});
   const [customModels, setCustomModels] = useState([]);
   const [currentModelIndex, setCurrentModelIndex] = useState(0);
+  const [agentDefaultConfig, setAgentDefaultConfig] = useState(null);
   const [userSkills, setUserSkills] = useState([]);
   const [builtInSkills, setBuiltInSkills] = useState([]);
   const [availableModels, setAvailableModels] = useState([]);
   const [oauthStatus, setOauthStatus] = useState({ isOAuthEnabled: false, isAuthenticated: false });
   const [codexStatus, setCodexStatus] = useState({ isAuthenticated: false });
   const [isLoading, setIsLoading] = useState(true);
+  const [onboarding, setOnboarding] = useState({ completed: true, primaryMode: null });
 
   // Load config on mount
   useEffect(() => {
@@ -23,8 +51,18 @@ export function useConfig() {
       setProviderKeys(config.providerKeys || {});
       setCustomModels(config.customModels || []);
       setCurrentModelIndex(config.currentModelIndex || 0);
+      setAgentDefaultConfig(config.agentDefaultConfig || null);
       setUserSkills(config.userSkills || []);
       setBuiltInSkills(config.builtInSkills || []);
+
+      // Load onboarding state
+      const obState = await chrome.storage.local.get([
+        'onboarding_completed', 'onboarding_primary_mode'
+      ]);
+      setOnboarding({
+        completed: obState.onboarding_completed !== false,
+        primaryMode: obState.onboarding_primary_mode || null,
+      });
 
       // Get OAuth statuses
       const oauth = await chrome.runtime.sendMessage({ type: 'GET_OAUTH_STATUS' });
@@ -116,7 +154,7 @@ export function useConfig() {
     for (const customModel of custom) {
       models.push({
         name: customModel.name,
-        provider: 'custom',
+        provider: 'openai',
         modelId: customModel.modelId,
         baseUrl: customModel.baseUrl,
         apiKey: customModel.apiKey,
@@ -153,9 +191,24 @@ export function useConfig() {
           apiBaseUrl: model.baseUrl,
           apiKey: model.apiKey,
           authMethod: model.authMethod,
+          provider: model.provider,
         },
       });
     }
+  }, [availableModels]);
+
+  const selectAgentDefault = useCallback(async (index) => {
+    const model = availableModels[index];
+    if (!model) return;
+
+    const serialized = serializeModelConfig(model);
+    setAgentDefaultConfig(serialized);
+    await chrome.runtime.sendMessage({
+      type: 'SAVE_CONFIG',
+      payload: {
+        agentDefaultConfig: serialized,
+      },
+    });
   }, [availableModels]);
 
   const setProviderKey = useCallback((provider, key) => {
@@ -213,24 +266,29 @@ export function useConfig() {
   }, [loadConfig]);
 
   const currentModel = availableModels[currentModelIndex] || null;
+  const currentAgentDefaultIndex = findModelIndex(availableModels, agentDefaultConfig);
 
   return {
     // State
     providerKeys,
     customModels,
     currentModelIndex,
+    agentDefaultConfig,
     userSkills,
     builtInSkills,
     availableModels,
     currentModel,
+    currentAgentDefaultIndex,
     oauthStatus,
     codexStatus,
     isLoading,
+    onboarding,
 
     // Actions
     loadConfig,
     saveConfig,
     selectModel,
+    selectAgentDefault,
     setProviderKey,
     addCustomModel,
     removeCustomModel,

@@ -8,75 +8,45 @@ import { RETRIES, DELAYS } from '../modules/constants.js';
 import { retryWithBackoff, isTabDraggingError } from '../utils/retry.js';
 
 // Tab state - shared references from service worker
-let sessionTabGroupId = null;
 let agentOpenedTabs = null;
-let _isAnySessionActive = () => false; // Function to check if any session is active (for parallel execution)
 let logFn = null;
 
 /**
  * @typedef {Object} TabManagerDeps
  * @property {Set<number>} agentOpenedTabs - Set of tab IDs opened by agent
- * @property {Function} isAnySessionActive - Function that returns true if any session is active
  * @property {Function} log - Logging function
  */
 
 /**
  * Initialize tab manager with shared state
- * NOTE: sessionTabGroupId no longer passed - managed per-session via parameters
  * @param {TabManagerDeps} deps - Dependency injection object
  */
 export function initTabManager(deps) {
   agentOpenedTabs = deps.agentOpenedTabs;
-  _isAnySessionActive = deps.isAnySessionActive;
   logFn = deps.log;
-}
-
-/**
- * Update session state
- * @param {number|null} groupId - Tab group ID to set
- */
-export function setSessionGroupId(groupId) {
-  sessionTabGroupId = groupId;
-}
-
-/**
- * Check if any agent session is currently active
- * @returns {boolean} True if any session is active
- */
-export function isSessionActive() {
-  return _isAnySessionActive();
-}
-
-/**
- * Get current session group ID
- * @returns {number|null} Current session tab group ID
- */
-export function getSessionGroupId() {
-  return sessionTabGroupId;
 }
 
 /**
  * Check if a tab is managed by the agent (in group or opened by agent)
  * @param {number} tabId - Tab ID to check
- * @param {number|null} [currentGroupId] - Current session group ID (overrides module state)
+ * @param {number|null} [currentGroupId] - Current session group ID
+ * @param {Set<number>|null} [openedTabs] - Session-specific opened tab set
  * @returns {Promise<boolean>} True if tab is managed by agent
  */
-export async function isTabManagedByAgent(tabId, currentGroupId = null) {
-  // Use provided group ID or fall back to module state
-  const groupIdToCheck = currentGroupId !== null ? currentGroupId : sessionTabGroupId;
-
+export async function isTabManagedByAgent(tabId, currentGroupId = null, openedTabs = null) {
   // Check if it's in our tab group
-  if (groupIdToCheck !== null) {
+  if (currentGroupId !== null) {
     try {
       const tab = await chrome.tabs.get(tabId);
-      if (tab.groupId === groupIdToCheck) return true;
+      if (tab.groupId === currentGroupId) return true;
     } catch (e) {
       // Tab doesn't exist
     }
   }
 
   // Check if it was opened by an agent action
-  return agentOpenedTabs && agentOpenedTabs.has(tabId);
+  const openedTabsToCheck = openedTabs || agentOpenedTabs;
+  return openedTabsToCheck && openedTabsToCheck.has(tabId);
 }
 
 /**
@@ -91,7 +61,6 @@ export async function ensureTabGroup(tabId, existingGroupId = null) {
     try {
       const group = await chrome.tabGroups.get(existingGroupId);
       if (group) {
-        sessionTabGroupId = existingGroupId;
         return existingGroupId;
       }
     } catch (e) {
@@ -104,8 +73,7 @@ export async function ensureTabGroup(tabId, existingGroupId = null) {
     const tab = await chrome.tabs.get(tabId);
     if (tab.groupId !== chrome.tabGroups.TAB_GROUP_ID_NONE) {
       // Tab is already in a group - adopt that group as our session group
-      sessionTabGroupId = tab.groupId;
-      return sessionTabGroupId;
+      return tab.groupId;
     }
   } catch (e) {
     // Tab doesn't exist or error getting tab info
@@ -121,7 +89,6 @@ export async function ensureTabGroup(tabId, existingGroupId = null) {
           color: 'cyan',
           collapsed: false,
         });
-        sessionTabGroupId = groupId;
         return groupId;
       },
       {
@@ -146,18 +113,15 @@ export async function ensureTabGroup(tabId, existingGroupId = null) {
  * @returns {Promise<void>}
  */
 export async function addTabToGroup(tabId, currentGroupId = null) {
-  // Use provided group ID or fall back to module state
-  const groupIdToUse = currentGroupId !== null ? currentGroupId : sessionTabGroupId;
-
-  if (groupIdToUse === null) {
-    await ensureTabGroup(tabId);
+  if (currentGroupId === null) {
+    await ensureTabGroup(tabId, currentGroupId);
     return;
   }
 
   try {
     await retryWithBackoff(
       async () => {
-        await chrome.tabs.group({ tabIds: [tabId], groupId: groupIdToUse });
+        await chrome.tabs.group({ tabIds: [tabId], groupId: currentGroupId });
       },
       {
         maxRetries: RETRIES.MAX_TAB_GROUP,
@@ -178,9 +142,6 @@ export async function addTabToGroup(tabId, currentGroupId = null) {
  * @returns {Promise<Object>} Validation result with {valid: boolean, error?: string}
  */
 export async function validateTabInGroup(tabId, currentGroupId = null) {
-  // Use provided group ID or fall back to module state
-  const groupIdToCheck = currentGroupId !== null ? currentGroupId : sessionTabGroupId;
-
   // Check if tab URL is restricted (chrome://, about:, etc.)
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -201,13 +162,13 @@ export async function validateTabInGroup(tabId, currentGroupId = null) {
     };
   }
 
-  if (groupIdToCheck === null) {
+  if (currentGroupId === null) {
     // No group yet - allow any tab (if not restricted)
     return { valid: true };
   }
 
   // Use the unified check
-  const isManaged = await isTabManagedByAgent(tabId, groupIdToCheck);
+  const isManaged = await isTabManagedByAgent(tabId, currentGroupId);
   if (isManaged) {
     return { valid: true };
   }

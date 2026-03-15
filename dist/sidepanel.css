@@ -842,7 +842,8 @@ body {
   letter-spacing: 0.5px;
 }
 
-.api-key-input input {
+.api-key-input input,
+.api-key-input select {
   width: 100%;
   padding: 10px 12px;
   background: var(--bg-primary);
@@ -852,7 +853,8 @@ body {
   font-size: 14px;
 }
 
-.api-key-input input:focus {
+.api-key-input input:focus,
+.api-key-input select:focus {
   outline: none;
   border-color: var(--accent);
 }

@@ -31,7 +31,7 @@ function isRestrictedUrl(url) {
  * @returns {Promise<string>} JSON string with available tabs, group ID, and note
  */
 export async function handleTabsContext(toolInput, deps) {
-  const { sessionTabGroupId, agentOpenedTabs, isAnySessionActive } = deps;
+  const { sessionTabGroupId, agentOpenedTabs, isAnySessionActive, mcpSession } = deps;
   let tabs = [];
   const existingTabIds = new Set();
 
@@ -64,32 +64,46 @@ export async function handleTabsContext(toolInput, deps) {
     }
   }
 
-  // 3. FALLBACK: Scan popup windows AND new normal windows during active session
+  // 3. FALLBACK: Scan the current session's window for untracked tabs.
+  // For MCP sessions, stay inside the dedicated task window.
+  // For UI sessions, scan other windows during the active run.
   // This catches popups/windows that weren't detected by listeners (payment flows, OAuth, etc.)
   if (isAnySessionActive()) {
     try {
-      // Get the main window ID (where the original tab group is)
-      let mainWindowId = null;
-      if (sessionTabGroupId !== null && tabs.length > 0) {
-        mainWindowId = tabs[0].windowId;
-      }
-
-      // Scan all windows (popup and normal)
-      const allWindows = await chrome.windows.getAll({ populate: false });
-      for (const window of allWindows) {
-        // Skip the main window (already got tabs from group)
-        if (mainWindowId && window.id === mainWindowId) continue;
-
-        const windowTabs = await chrome.tabs.query({ windowId: window.id });
+      if (mcpSession?.windowId) {
+        const windowTabs = await chrome.tabs.query({ windowId: mcpSession.windowId });
         for (const tab of windowTabs) {
-          // Skip restricted pages - Chrome blocks extension access
           if (!existingTabIds.has(tab.id) && !isRestrictedUrl(tab.url)) {
             tabs.push(tab);
             existingTabIds.add(tab.id);
-            // Also add to tracking for future reference
             agentOpenedTabs.add(tab.id);
-            const windowType = window.type || 'normal';
-            console.log(`[TABS_CONTEXT] Found untracked ${windowType} window tab: ${tab.id} - ${tab.url}`);
+            console.log(`[TABS_CONTEXT] Found untracked session window tab: ${tab.id} - ${tab.url}`);
+          }
+        }
+      } else {
+        // Get the main window ID (where the original tab group is)
+        let mainWindowId = null;
+        if (sessionTabGroupId !== null && tabs.length > 0) {
+          mainWindowId = tabs[0].windowId;
+        }
+
+        // UI session: scan other windows (popup and normal)
+        const allWindows = await chrome.windows.getAll({ populate: false });
+        for (const window of allWindows) {
+          // Skip the main window (already got tabs from group)
+          if (mainWindowId && window.id === mainWindowId) continue;
+
+          const windowTabs = await chrome.tabs.query({ windowId: window.id });
+          for (const tab of windowTabs) {
+            // Skip restricted pages - Chrome blocks extension access
+            if (!existingTabIds.has(tab.id) && !isRestrictedUrl(tab.url)) {
+              tabs.push(tab);
+              existingTabIds.add(tab.id);
+              // Also add to tracking for future reference
+              agentOpenedTabs.add(tab.id);
+              const windowType = window.type || 'normal';
+              console.log(`[TABS_CONTEXT] Found untracked ${windowType} window tab: ${tab.id} - ${tab.url}`);
+            }
           }
         }
       }

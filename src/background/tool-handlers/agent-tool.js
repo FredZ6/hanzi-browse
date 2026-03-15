@@ -7,9 +7,10 @@ import { solveCaptcha } from '../modules/captcha-solvers.js';
 
 /**
  * @typedef {Object} AgentToolDeps
- * @property {Function} pendingPlanResolve - Plan approval promise resolver
  * @property {boolean} askBeforeActing - Whether to ask user for plan approval
- * @property {Map<number, Object>} capturedCaptchaData - Map of tab IDs to CAPTCHA data
+ * @property {Function} setPendingPlanResolve - Plan approval promise resolver setter
+ * @property {Function} [getCapturedCaptchaData] - Get scoped CAPTCHA data map
+ * @property {Map<number, Object>} [capturedCaptchaData] - Legacy CAPTCHA data map
  */
 
 /**
@@ -64,7 +65,9 @@ export async function handleTurnAnswerStart() {
  */
 export async function handleSolveCaptcha(toolInput, deps) {
   const { tabId } = toolInput;
-  const { capturedCaptchaData } = deps;
+  const capturedCaptchaData = deps.getCapturedCaptchaData
+    ? deps.getCapturedCaptchaData()
+    : deps.capturedCaptchaData;
 
   const data = capturedCaptchaData.get(tabId);
   if (!data) {

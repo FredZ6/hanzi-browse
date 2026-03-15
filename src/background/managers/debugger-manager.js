@@ -13,34 +13,102 @@ let debuggerListenerRegistered = false;
 
 // Popup tracking: maps popup tabId -> opener tabId
 const popupOpeners = new Map();
+const tabSessionOwners = new Map(); // tabId -> session scope
 
-// Shared state references (will be initialized)
-let consoleMessages = [];
-let networkRequests = [];
-let capturedCaptchaData = null;
+// Per-session debugger state
+const sessionConsoleMessages = new Map(); // scope -> Array<Object>
+const sessionNetworkRequests = new Map(); // scope -> Array<Object>
+const sessionCaptchaData = new Map(); // scope -> Map<tabId, Object>
 let logFn = null;
 
 // Callbacks for popup events (set by service worker)
-let onPopupOpened = null;  // (popupTabId, openerTabId) => void
-let onPopupClosed = null;  // (popupTabId, openerTabId) => void
+let onPopupOpened = null; // (popupTabId, openerTabId) => void
+let onPopupClosed = null; // (popupTabId, openerTabId) => void
 
 /**
  * @typedef {Object} DebuggerDeps
- * @property {Array<Object>} consoleMessages - Shared array for console messages
- * @property {Array<Object>} networkRequests - Shared array for network requests
- * @property {Map<number, Object>} capturedCaptchaData - Map of tab IDs to CAPTCHA data
  * @property {Function} log - Logging function
  */
 
+function getSessionScope(sessionId = null) {
+  return sessionId || 'default';
+}
+
+function ensureSessionState(sessionId = null) {
+  const scope = getSessionScope(sessionId);
+  if (!sessionConsoleMessages.has(scope)) {
+    sessionConsoleMessages.set(scope, []);
+  }
+  if (!sessionNetworkRequests.has(scope)) {
+    sessionNetworkRequests.set(scope, []);
+  }
+  if (!sessionCaptchaData.has(scope)) {
+    sessionCaptchaData.set(scope, new Map());
+  }
+  return {
+    scope,
+    consoleMessages: sessionConsoleMessages.get(scope),
+    networkRequests: sessionNetworkRequests.get(scope),
+    capturedCaptchaData: sessionCaptchaData.get(scope),
+  };
+}
+
+function getStateForTab(tabId) {
+  return ensureSessionState(tabSessionOwners.get(tabId) || null);
+}
+
 /**
- * Initialize debugger manager with shared state references
+ * Initialize debugger manager
  * @param {DebuggerDeps} deps - Dependency injection object
  */
 export function initDebugger(deps) {
-  consoleMessages = deps.consoleMessages;
-  networkRequests = deps.networkRequests;
-  capturedCaptchaData = deps.capturedCaptchaData;
   logFn = deps.log;
+}
+
+export function registerDebuggerSession(tabId, sessionId = null) {
+  const scope = getSessionScope(sessionId);
+  tabSessionOwners.set(tabId, scope);
+  ensureSessionState(scope);
+}
+
+export function unregisterDebuggerSession(sessionId = null) {
+  const scope = getSessionScope(sessionId);
+  sessionConsoleMessages.delete(scope);
+  sessionNetworkRequests.delete(scope);
+  sessionCaptchaData.delete(scope);
+
+  for (const [tabId, ownerScope] of tabSessionOwners.entries()) {
+    if (ownerScope === scope) {
+      tabSessionOwners.delete(tabId);
+    }
+  }
+}
+
+export function getConsoleMessages(sessionId = null) {
+  return ensureSessionState(sessionId).consoleMessages;
+}
+
+export function clearConsoleMessages(sessionId = null) {
+  ensureSessionState(sessionId).consoleMessages.length = 0;
+}
+
+export function getNetworkRequests(sessionId = null) {
+  return ensureSessionState(sessionId).networkRequests;
+}
+
+export function clearNetworkRequests(sessionId = null) {
+  ensureSessionState(sessionId).networkRequests.length = 0;
+}
+
+export function getCapturedCaptchaData(sessionId = null) {
+  return ensureSessionState(sessionId).capturedCaptchaData;
+}
+
+export function clearDebuggerSession(sessionId = null) {
+  const state = ensureSessionState(sessionId);
+  state.consoleMessages.length = 0;
+  state.networkRequests.length = 0;
+  state.capturedCaptchaData.clear();
 }
 
 /**
@@ -67,6 +135,8 @@ function registerDebuggerListener() {
       console.log(`[DEBUGGER] Detached from tab ${source.tabId}: ${reason}`);
       attachedTabs.delete(source.tabId);
       networkEnabledTabs.delete(source.tabId);
+      targetDiscoveryEnabled.delete(source.tabId);
+      tabSessionOwners.delete(source.tabId);
     }
   });
 
@@ -75,32 +145,35 @@ function registerDebuggerListener() {
     if (!attachedTabs.has(source.tabId)) return;
 
     if (method === 'Runtime.consoleAPICalled') {
+      const state = getStateForTab(source.tabId);
       const msg = {
         type: params.type,
         text: params.args.map(arg => arg.value || arg.description || '').join(' '),
         timestamp: Date.now(),
       };
-      consoleMessages.push(msg);
-      if (consoleMessages.length > LIMITS.CONSOLE_MESSAGES) {
-        consoleMessages.splice(0, consoleMessages.length - LIMITS.CONSOLE_MESSAGES);
+      state.consoleMessages.push(msg);
+      if (state.consoleMessages.length > LIMITS.CONSOLE_MESSAGES) {
+        state.consoleMessages.splice(0, state.consoleMessages.length - LIMITS.CONSOLE_MESSAGES);
       }
     }
 
     if (method === 'Network.requestWillBeSent') {
+      const state = getStateForTab(source.tabId);
       const request = {
         requestId: params.requestId,
         url: params.request.url,
         method: params.request.method,
         timestamp: Date.now(),
       };
-      networkRequests.push(request);
-      if (networkRequests.length > LIMITS.NETWORK_REQUESTS) {
-        networkRequests.splice(0, networkRequests.length - LIMITS.NETWORK_REQUESTS);
+      state.networkRequests.push(request);
+      if (state.networkRequests.length > LIMITS.NETWORK_REQUESTS) {
+        state.networkRequests.splice(0, state.networkRequests.length - LIMITS.NETWORK_REQUESTS);
       }
     }
 
     if (method === 'Network.responseReceived') {
-      const req = networkRequests.find(r => r.requestId === params.requestId);
+      const state = getStateForTab(source.tabId);
+      const req = state.networkRequests.find(r => r.requestId === params.requestId);
       if (req) {
         req.status = params.response.status;
         req.responseUrl = params.response.url;
@@ -109,7 +182,8 @@ function registerDebuggerListener() {
 
     // Capture response body when loading finishes (body is now available)
     if (method === 'Network.loadingFinished') {
-      const req = networkRequests.find(r => r.requestId === params.requestId);
+      const state = getStateForTab(source.tabId);
+      const req = state.networkRequests.find(r => r.requestId === params.requestId);
       if (req && req.responseUrl && req.responseUrl.includes('/captcha/challenge')) {
         (async () => {
           try {
@@ -120,7 +194,7 @@ function registerDebuggerListener() {
             );
             if (result && result.body) {
               const data = JSON.parse(result.body);
-              capturedCaptchaData.set(source.tabId, {
+              state.capturedCaptchaData.set(source.tabId, {
                 imageUrls: data.images.map(img => img.url),
                 encryptedAnswer: data.encrypted_answer,
                 timestamp: Date.now(),
@@ -136,7 +210,8 @@ function registerDebuggerListener() {
     }
 
     if (method === 'Network.loadingFailed') {
-      const req = networkRequests.find(r => r.requestId === params.requestId);
+      const state = getStateForTab(source.tabId);
+      const req = state.networkRequests.find(r => r.requestId === params.requestId);
       if (req) {
         req.status = 0;
         req.error = params.errorText;
@@ -171,6 +246,10 @@ function registerDebuggerListener() {
 
                 // Track the relationship
                 popupOpeners.set(popupTarget.tabId, openerTarget.tabId);
+                registerDebuggerSession(
+                  popupTarget.tabId,
+                  tabSessionOwners.get(openerTarget.tabId) || null
+                );
 
                 // Notify service worker
                 if (onPopupOpened) {
@@ -203,6 +282,7 @@ function registerDebuggerListener() {
               // This popup was closed
               console.log(`[POPUP] Popup ${popupTabId} (from opener ${openerTabId}) closed`);
               popupOpeners.delete(popupTabId);
+              tabSessionOwners.delete(popupTabId);
 
               if (onPopupClosed) {
                 onPopupClosed(popupTabId, openerTabId);
@@ -233,9 +313,10 @@ async function isDebuggerAttached(tabId) {
 /**
  * Ensure debugger is attached to a tab
  * @param {number} tabId - Tab ID to attach debugger to
+ * @param {string|null} [sessionId] - Session scope for debugger buffers
  * @returns {Promise<boolean>} True if debugger attached successfully, false otherwise
  */
-export async function ensureDebugger(tabId) {
+export async function ensureDebugger(tabId, sessionId = null) {
   registerDebuggerListener();
 
   // Verify tab exists before attempting to attach
@@ -249,6 +330,8 @@ export async function ensureDebugger(tabId) {
     await logFn('DEBUGGER', 'Tab not accessible', { tabId, error: e.message });
     return false;
   }
+
+  registerDebuggerSession(tabId, sessionId);
 
   const alreadyAttached = await isDebuggerAttached(tabId);
   if (alreadyAttached) {
@@ -314,10 +397,14 @@ export async function detachDebugger(tabId = null) {
     attachedTabs.delete(tabId);
     networkEnabledTabs.delete(tabId);
     targetDiscoveryEnabled.delete(tabId);
+    tabSessionOwners.delete(tabId);
     // Clean up any popup relationships involving this tab
     popupOpeners.delete(tabId);
     for (const [popupId, openerId] of popupOpeners.entries()) {
-      if (openerId === tabId) popupOpeners.delete(popupId);
+      if (openerId === tabId) {
+        popupOpeners.delete(popupId);
+        tabSessionOwners.delete(popupId);
+      }
     }
   } else {
     // Detach from all tabs (legacy behavior for UI tasks)
@@ -332,6 +419,7 @@ export async function detachDebugger(tabId = null) {
     networkEnabledTabs.clear();
     targetDiscoveryEnabled.clear();
     popupOpeners.clear();
+    tabSessionOwners.clear();
   }
 }
 
@@ -372,7 +460,7 @@ export async function sendDebuggerCommand(tabId, method, params = {}) {
       attachedTabs.delete(tabId);
       networkEnabledTabs.delete(tabId);
 
-      const attached = await ensureDebugger(tabId);
+      const attached = await ensureDebugger(tabId, tabSessionOwners.get(tabId) || null);
       if (!attached) {
         throw new Error('Failed to reattach debugger');
       }

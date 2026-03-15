@@ -26,11 +26,13 @@ const PROVIDERS = [
  * @returns {BaseProvider} Provider instance
  */
 export function createProvider(baseUrl, config, providerName = null) {
+  const explicitProvider = providerName || config?.provider || null;
+
   // If explicit provider name is given, use it
-  if (providerName) {
+  if (explicitProvider) {
     const ProviderClass = PROVIDERS.find(P => {
       const instance = new P({});
-      return instance.getName() === providerName;
+      return instance.getName() === explicitProvider;
     });
     if (ProviderClass) {
       return new ProviderClass(config);

@@ -8,8 +8,12 @@
  * @property {Function} ensureDebugger - Attach debugger to tab if needed
  * @property {Function} isNetworkTrackingEnabled - Check if network tracking is enabled
  * @property {Function} enableNetworkTracking - Enable network tracking
- * @property {Array<Object>} consoleMessages - Shared array of console messages
- * @property {Array<Object>} networkRequests - Shared array of network requests
+ * @property {Function} [getConsoleMessages] - Get scoped console messages
+ * @property {Function} [clearConsoleMessages] - Clear scoped console messages
+ * @property {Function} [getNetworkRequests] - Get scoped network requests
+ * @property {Function} [clearNetworkRequests] - Clear scoped network requests
+ * @property {Array<Object>} [consoleMessages] - Legacy shared array of console messages
+ * @property {Array<Object>} [networkRequests] - Legacy shared array of network requests
  */
 
 /**
@@ -25,7 +29,11 @@
  */
 export async function handleReadConsoleMessages(toolInput, deps) {
   const { tabId } = toolInput;
-  const { ensureDebugger, consoleMessages } = deps;
+  const { ensureDebugger } = deps;
+  const consoleMessages = deps.getConsoleMessages ? deps.getConsoleMessages() : deps.consoleMessages;
+  const clearConsoleMessages = deps.clearConsoleMessages
+    ? () => deps.clearConsoleMessages()
+    : () => { consoleMessages.length = 0; };
 
   await ensureDebugger(tabId);
   const pattern = toolInput.pattern;
@@ -45,7 +53,7 @@ export async function handleReadConsoleMessages(toolInput, deps) {
   }
 
   if (toolInput.clear) {
-    consoleMessages.length = 0; // Clear array in place
+    clearConsoleMessages();
   }
 
   messages = messages.slice(-limit);
@@ -70,10 +78,14 @@ export async function handleReadConsoleMessages(toolInput, deps) {
  */
 export async function handleReadNetworkRequests(toolInput, deps) {
   const { tabId } = toolInput;
-  const { ensureDebugger, isNetworkTrackingEnabled, enableNetworkTracking, networkRequests } = deps;
+  const { ensureDebugger, isNetworkTrackingEnabled, enableNetworkTracking } = deps;
+  const networkRequests = deps.getNetworkRequests ? deps.getNetworkRequests() : deps.networkRequests;
+  const clearNetworkRequests = deps.clearNetworkRequests
+    ? () => deps.clearNetworkRequests()
+    : () => { networkRequests.length = 0; };
 
   await ensureDebugger(tabId);
-  if (!isNetworkTrackingEnabled()) {
+  if (!isNetworkTrackingEnabled(tabId)) {
     try {
       await enableNetworkTracking(tabId);
     } catch (err) {
@@ -90,7 +102,7 @@ export async function handleReadNetworkRequests(toolInput, deps) {
   }
 
   if (toolInput.clear) {
-    networkRequests.length = 0; // Clear array in place
+    clearNetworkRequests();
   }
 
   requests = requests.slice(-limit);

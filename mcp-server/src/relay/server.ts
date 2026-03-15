@@ -12,15 +12,19 @@
  *   - cli: CLI clients (can have multiple)
  *
  * Routing:
- *   - extension → broadcast to all mcp + cli clients
+ *   - extension → originating mcp/cli client when tagged, otherwise broadcast
  *   - mcp/cli → send to extension
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
+import { randomUUID } from 'crypto';
 import {
   getClaudeCredentials,
   getClaudeKeychainCredentials,
   getCodexCredentials,
+  refreshClaudeToken,
+  saveClaudeCredentials,
+  type ClaudeCredentials,
 } from '../llm/credentials.js';
 
 const DEFAULT_PORT = 7862;
@@ -31,6 +35,7 @@ type ClientRole = 'extension' | 'mcp' | 'cli';
 interface RelayClient {
   ws: WebSocket;
   role: ClientRole;
+  clientId: string;
   sessionId?: string;
   registeredAt: number;
 }
@@ -55,18 +60,11 @@ function getExtension(): RelayClient | undefined {
   return getClientsByRole('extension')[0];
 }
 
-function broadcast(message: string, exclude?: WebSocket): void {
+function sendToConsumers(message: string, targetClientId?: string, exclude?: WebSocket): void {
   for (const [ws, client] of clients) {
-    if (ws !== exclude && ws.readyState === WebSocket.OPEN) {
-      ws.send(message);
-    }
-  }
-}
-
-function sendToConsumers(message: string, exclude?: WebSocket): void {
-  for (const [ws, client] of clients) {
-    if (ws !== exclude && ws.readyState === WebSocket.OPEN &&
-        (client.role === 'mcp' || client.role === 'cli')) {
+    const isConsumer = client.role === 'mcp' || client.role === 'cli';
+    const matchesTarget = !targetClientId || client.clientId === targetClientId;
+    if (ws !== exclude && ws.readyState === WebSocket.OPEN && isConsumer && matchesTarget) {
       ws.send(message);
     }
   }
@@ -80,6 +78,25 @@ function sendToExtension(message: string): boolean {
   }
 
   // Extension not connected — queue the message for delivery on reconnect
+  // Deduplicate start_task by sessionId: if a start_task for the same session
+  // is already queued, replace it instead of adding a duplicate.
+  try {
+    const parsed = JSON.parse(message);
+    if (parsed.type === 'mcp_start_task' && parsed.sessionId) {
+      for (let i = 0; i < extensionQueue.length; i++) {
+        try {
+          const queued = JSON.parse(extensionQueue[i]);
+          if (queued.type === 'mcp_start_task' && queued.sessionId === parsed.sessionId) {
+            log(`Deduplicating queued start_task for session ${parsed.sessionId}`);
+            extensionQueue[i] = message;
+            queueTimestamps[i] = Date.now();
+            return true;
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+  } catch { /* not JSON, queue as-is */ }
+
   if (extensionQueue.length >= MAX_QUEUE_SIZE) {
     extensionQueue.shift();
     queueTimestamps.shift();
@@ -159,11 +176,12 @@ wss.on('connection', (ws) => {
       clients.set(ws, {
         ws,
         role,
+        clientId: randomUUID().slice(0, 8),
         sessionId: msg.sessionId,
         registeredAt: Date.now(),
       });
 
-      ws.send(JSON.stringify({ type: 'registered', role }));
+      ws.send(JSON.stringify({ type: 'registered', role, clientId: clients.get(ws)!.clientId }));
       log(`Client registered as ${role} (${clients.size} total)`);
 
       // Deliver any queued messages to the extension
@@ -187,6 +205,7 @@ wss.on('connection', (ws) => {
       const ext = getExtension();
       ws.send(JSON.stringify({
         type: 'status_response',
+        requestId: msg.requestId,
         extensionConnected: !!ext && ext.ws.readyState === WebSocket.OPEN,
       }));
       return;
@@ -201,6 +220,7 @@ wss.on('connection', (ws) => {
           if (creds) {
             ws.send(JSON.stringify({
               type: 'credentials_result',
+              requestId: msg.requestId,
               credentialType: 'claude',
               credentials: {
                 accessToken: creds.accessToken,
@@ -211,6 +231,7 @@ wss.on('connection', (ws) => {
           } else {
             ws.send(JSON.stringify({
               type: 'credentials_result',
+              requestId: msg.requestId,
               credentialType: 'claude',
               error: 'Claude credentials not found. Run `claude login` first.',
             }));
@@ -220,6 +241,7 @@ wss.on('connection', (ws) => {
           if (creds) {
             ws.send(JSON.stringify({
               type: 'credentials_result',
+              requestId: msg.requestId,
               credentialType: 'codex',
               credentials: {
                 accessToken: creds.accessToken,
@@ -230,6 +252,7 @@ wss.on('connection', (ws) => {
           } else {
             ws.send(JSON.stringify({
               type: 'credentials_result',
+              requestId: msg.requestId,
               credentialType: 'codex',
               error: 'Codex credentials not found. Run `codex auth login` first.',
             }));
@@ -237,12 +260,14 @@ wss.on('connection', (ws) => {
         } else {
           ws.send(JSON.stringify({
             type: 'credentials_result',
+            requestId: msg.requestId,
             error: `Unknown credential type: ${credentialType}`,
           }));
         }
       } catch (err: any) {
         ws.send(JSON.stringify({
           type: 'credentials_result',
+          requestId: msg.requestId,
           error: err.message,
         }));
       }
@@ -258,11 +283,11 @@ wss.on('connection', (ws) => {
     const raw = data.toString();
 
     if (client.role === 'extension') {
-      // Extension → broadcast to all MCP + CLI consumers
-      sendToConsumers(raw);
+      // Extension → originating MCP/CLI client when known, otherwise broadcast
+      sendToConsumers(raw, typeof msg.sourceClientId === 'string' ? msg.sourceClientId : undefined);
     } else {
       // MCP/CLI → send to extension (queued if offline)
-      sendToExtension(raw);
+      sendToExtension(JSON.stringify({ ...msg, sourceClientId: client.clientId }));
     }
   });
 
@@ -285,10 +310,30 @@ wss.on('connection', (ws) => {
  */
 async function handleApiProxy(ws: WebSocket, msg: any): Promise<void> {
   const { requestId, url, body } = msg;
+  const PROXY_TIMEOUT_MS = 150000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+  const EXPIRY_BUFFER_MS = 60 * 1000;
+
+  const getFreshClaudeCredentials = async (): Promise<ClaudeCredentials | null> => {
+    const existing = getClaudeCredentials() || getClaudeKeychainCredentials();
+    if (!existing) {
+      return null;
+    }
+
+    if (existing.expiresAt && existing.expiresAt > Date.now() + EXPIRY_BUFFER_MS) {
+      return existing;
+    }
+
+    log('Claude OAuth token expired or near expiry, refreshing before proxy call');
+    const refreshed = await refreshClaudeToken(existing.refreshToken);
+    saveClaudeCredentials(refreshed);
+    return refreshed;
+  };
 
   try {
     // Read OAuth credentials
-    const creds = getClaudeCredentials() || getClaudeKeychainCredentials();
+    let creds = await getFreshClaudeCredentials();
     if (!creds) {
       ws.send(JSON.stringify({ type: 'proxy_api_error', requestId, error: 'No Claude credentials found' }));
       return;
@@ -305,10 +350,20 @@ async function handleApiProxy(ws: WebSocket, msg: any): Promise<void> {
       'user-agent': 'claude-code/2.1.29 (Darwin; arm64)',
     };
 
-    const response = await fetch(url, { method: 'POST', headers, body });
+    let response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+
+    if (response.status === 401) {
+      log('Claude proxy request got 401, refreshing token and retrying once');
+      const refreshed = await refreshClaudeToken(creds.refreshToken);
+      saveClaudeCredentials(refreshed);
+      creds = refreshed;
+      headers.Authorization = `Bearer ${creds.accessToken}`;
+      response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+    }
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
+      clearTimeout(timeoutId);
       ws.send(JSON.stringify({
         type: 'proxy_api_error',
         requestId,
@@ -351,16 +406,21 @@ async function handleApiProxy(ws: WebSocket, msg: any): Promise<void> {
       }
     }
 
+    clearTimeout(timeoutId);
+
     // Signal stream complete
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'proxy_stream_end', requestId }));
     }
   } catch (err: any) {
+    clearTimeout(timeoutId);
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'proxy_api_error',
         requestId,
-        error: err.message,
+        error: err.name === 'AbortError'
+          ? `API proxy request timed out after ${PROXY_TIMEOUT_MS / 1000} seconds`
+          : err.message,
       }));
     }
   }

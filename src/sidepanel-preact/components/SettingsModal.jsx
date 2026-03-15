@@ -5,8 +5,13 @@ export function SettingsModal({ config, onClose }) {
   const [activeTab, setActiveTab] = useState('providers');
   const [selectedProvider, setSelectedProvider] = useState(null);
   const [localKeys, setLocalKeys] = useState({ ...config.providerKeys });
+  const [agentDefaultIndex, setAgentDefaultIndex] = useState(config.currentAgentDefaultIndex);
   const [newCustomModel, setNewCustomModel] = useState({ name: '', baseUrl: '', modelId: '', apiKey: '' });
   const [skillForm, setSkillForm] = useState({ domain: '', skill: '', isOpen: false, editIndex: -1 });
+
+  useEffect(() => {
+    setAgentDefaultIndex(config.currentAgentDefaultIndex);
+  }, [config.currentAgentDefaultIndex]);
 
   const handleSave = async () => {
     // Update provider keys
@@ -16,6 +21,9 @@ export function SettingsModal({ config, onClose }) {
       }
     }
     await config.saveConfig();
+    if (agentDefaultIndex !== config.currentAgentDefaultIndex && agentDefaultIndex >= 0) {
+      await config.selectAgentDefault(agentDefaultIndex);
+    }
     onClose();
   };
 
@@ -84,6 +92,8 @@ export function SettingsModal({ config, onClose }) {
               setLocalKeys={setLocalKeys}
               selectedProvider={selectedProvider}
               setSelectedProvider={setSelectedProvider}
+              agentDefaultIndex={agentDefaultIndex}
+              setAgentDefaultIndex={setAgentDefaultIndex}
               config={config}
             />
           )}
@@ -124,34 +134,42 @@ export function SettingsModal({ config, onClose }) {
   );
 }
 
-function ProvidersTab({ localKeys, setLocalKeys, selectedProvider, setSelectedProvider, config }) {
+function ProvidersTab({
+  localKeys,
+  setLocalKeys,
+  selectedProvider,
+  setSelectedProvider,
+  agentDefaultIndex,
+  setAgentDefaultIndex,
+  config
+}) {
   return (
     <div class="tab-content">
-      {/* Claude Code Plan */}
+      {/* Import Claude credentials */}
       <div class="provider-section">
-        <h4>Claude Code Plan</h4>
-        <p class="provider-desc">Use your Claude Pro/Max subscription. <a href="https://github.com/hanzili/hanzi-in-chrome#claude-code-plan-setup" target="_blank">Setup guide</a></p>
+        <h4>Import Claude credentials</h4>
+        <p class="provider-desc">Import from <code>claude login</code> to use your Claude Pro/Max subscription. <a href="https://github.com/hanzili/hanzi-in-chrome#claude-code-plan-setup" target="_blank">Setup guide</a></p>
         {config.oauthStatus.isAuthenticated ? (
           <div class="connected-status">
             <span class="status-badge connected">Connected</span>
             <button class="btn btn-secondary btn-sm" onClick={config.logoutCLI}>Disconnect</button>
           </div>
         ) : (
-          <button class="btn btn-primary" onClick={config.importCLI}>Connect</button>
+          <button class="btn btn-primary" onClick={config.importCLI}>Import from claude login</button>
         )}
       </div>
 
-      {/* Codex Plan */}
+      {/* Import Codex credentials */}
       <div class="provider-section">
-        <h4>Codex Plan</h4>
-        <p class="provider-desc">Use your ChatGPT Pro/Plus subscription. <a href="https://github.com/hanzili/hanzi-in-chrome#codex-plan-setup" target="_blank">Setup guide</a></p>
+        <h4>Import Codex credentials</h4>
+        <p class="provider-desc">Import from <code>codex login</code> to use your ChatGPT Pro/Plus subscription. <a href="https://github.com/hanzili/hanzi-in-chrome#codex-plan-setup" target="_blank">Setup guide</a></p>
         {config.codexStatus.isAuthenticated ? (
           <div class="connected-status">
             <span class="status-badge connected">Connected</span>
             <button class="btn btn-secondary btn-sm" onClick={config.logoutCodex}>Disconnect</button>
           </div>
         ) : (
-          <button class="btn btn-primary" onClick={config.importCodex}>Connect</button>
+          <button class="btn btn-primary" onClick={config.importCodex}>Import from codex login</button>
         )}
       </div>
 
@@ -183,6 +201,34 @@ function ProvidersTab({ localKeys, setLocalKeys, selectedProvider, setSelectedPr
           />
         </div>
       )}
+
+      <hr />
+
+      <div class="provider-section">
+        <h4>browser automation default</h4>
+        <p class="provider-desc">
+          used by <code>hanzi-browser</code> and mcp browser tasks.
+          the sidepanel model is still selected from the header.
+        </p>
+        <div class="api-key-input">
+          <label>default model for cli / mcp</label>
+          <select
+            value={agentDefaultIndex >= 0 ? String(agentDefaultIndex) : ''}
+            onChange={(e) => setAgentDefaultIndex(Number(e.target.value))}
+            disabled={config.availableModels.length === 0}
+          >
+            {config.availableModels.length === 0 ? (
+              <option value="">connect a model source first</option>
+            ) : (
+              config.availableModels.map((model, index) => (
+                <option key={`${model.provider}-${model.modelId}-${index}`} value={String(index)}>
+                  {model.name}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+      </div>
 
       <hr />
 

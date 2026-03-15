@@ -60,6 +60,7 @@ export class CodexProvider extends BaseProvider {
     const useStreaming = !!onTextChunk;
     const requestBody = this.buildRequestBody(messages, systemPrompt, tools, useStreaming);
     const url = this.buildUrl(useStreaming);
+    const REQUEST_TIMEOUT_MS = 150000;
 
     await log?.('DEBUG', 'Codex API call through proxy', {
       url,
@@ -70,6 +71,8 @@ export class CodexProvider extends BaseProvider {
 
     return new Promise((resolve, reject) => {
       let port = null;
+      let settled = false;
+      let timeoutId = null;
       let result = {
         content: [],
         usage: null,
@@ -78,10 +81,45 @@ export class CodexProvider extends BaseProvider {
       let currentText = '';
       let itemsById = {};  // Track Responses API items by id
 
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        if (port) {
+          try {
+            port.disconnect();
+          } catch {
+            // Native port may already be closed.
+          }
+          port = null;
+        }
+      };
+
+      const settleResolve = (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      };
+
+      const settleReject = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
       try {
         port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
 
+        timeoutId = setTimeout(() => {
+          settleReject(new Error(`Codex request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`));
+        }, REQUEST_TIMEOUT_MS);
+
         port.onMessage.addListener(async (message) => {
+          if (settled) return;
+
           if (message.type === 'stream_chunk') {
             // Handle Responses API streaming events
             const event = message.data;
@@ -200,37 +238,35 @@ export class CodexProvider extends BaseProvider {
               result.content.push({ type: 'text', text: '' });
             }
 
-            if (port) port.disconnect();
-            resolve(result);
+            settleResolve(result);
 
           } else if (message.type === 'api_response') {
             // Handle non-streaming response
             if (message.status >= 400) {
-              if (port) port.disconnect();
-              reject(new Error(`Codex API error: ${message.status} - ${message.body}`));
+              settleReject(new Error(`Codex API error: ${message.status} - ${message.body}`));
               return;
             }
 
             try {
               const response = JSON.parse(message.body);
               const normalized = this.normalizeResponse(response);
-              if (port) port.disconnect();
-              resolve(normalized);
+              settleResolve(normalized);
             } catch (e) {
-              if (port) port.disconnect();
-              reject(new Error(`Failed to parse Codex response: ${e.message}`));
+              settleReject(new Error(`Failed to parse Codex response: ${e.message}`));
             }
 
           } else if (message.type === 'api_error') {
-            if (port) port.disconnect();
-            reject(new Error(message.error));
+            settleReject(new Error(message.error));
           }
         });
 
         port.onDisconnect.addListener(() => {
+          if (settled) return;
           if (chrome.runtime.lastError) {
-            reject(new Error(`Native host error: ${chrome.runtime.lastError.message}`));
+            settleReject(new Error(`Native host error: ${chrome.runtime.lastError.message}`));
+            return;
           }
+          settleReject(new Error('Codex native host disconnected before the request completed.'));
         });
 
         // Send API request through proxy
@@ -245,8 +281,7 @@ export class CodexProvider extends BaseProvider {
         });
 
       } catch (error) {
-        if (port) port.disconnect();
-        reject(new Error(`Failed to connect to native host: ${error.message}`));
+        settleReject(new Error(`Failed to connect to native host: ${error.message}`));
       }
     });
   }

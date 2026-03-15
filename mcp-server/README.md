@@ -1,6 +1,7 @@
 # Hanzi in Chrome — MCP Server
 
-The MCP server that connects your AI tool to the Chrome extension. Install this to give Claude Code, Cursor, Windsurf, or any MCP client browser capabilities.
+The MCP server exposes browser tools to MCP clients and forwards browser work to
+the Chrome extension over the local WebSocket relay.
 
 ## Setup
 
@@ -25,11 +26,24 @@ Add to your MCP config (e.g., `~/.claude/claude_desktop_config.json`):
 
 **Prerequisites:** The Chrome extension must be installed and running. See the [main README](../README.md) for full setup.
 
+## How It Works
+
+```text
+MCP client
+  -> mcp-server (stdio)
+  -> relay (WebSocket)
+  -> Chrome extension
+  -> browser agent
+```
+
+The extension is the browser executor. The MCP server should only manage MCP
+tool calls, local session bookkeeping, and blocking waits for completion.
+
 ## Tools
 
 ### `browser_start`
 
-Start a browser task. **Blocks until complete** — no polling needed.
+Start a browser task. **Blocks until complete or timeout**.
 
 ```
 browser_start(
@@ -58,7 +72,7 @@ browser_message(session_id: "abc123", message: "Book the cheapest one")
 
 ### `browser_status`
 
-Check what's running.
+Check known sessions and their latest status.
 
 ```
 browser_status()                    // all active sessions
@@ -126,16 +140,23 @@ browser_start("Look up train pass costs")
 ```
 AI Tool (Claude Code, Cursor, etc.)
     ↓ MCP Protocol (stdio)
-MCP Server (this)
+MCP Server
     ↓ WebSocket
-Relay Server (localhost:7862)
+Relay Server
     ↓ WebSocket
-Chrome Extension (user's browser)
-    ↓ Browser automation
+Chrome Extension
+    ↓ Extension agent loop
 Target Website
 ```
 
-The relay server starts automatically when the MCP server connects. It routes messages between the MCP server and the Chrome extension, with message queuing for when the extension's service worker is sleeping.
+The relay server starts automatically when the MCP server connects. It routes
+messages between the MCP server and the Chrome extension and briefly queues
+messages while the extension service worker is asleep.
+
+For the current design and validation status, see
+[ARCHITECTURE.md](/Users/apple/Dev/llm-in-chrome/mcp-server/ARCHITECTURE.md)
+and
+[MCP_STATUS.md](/Users/apple/Dev/llm-in-chrome/docs/internal/MCP_STATUS.md).
 
 ## License
 

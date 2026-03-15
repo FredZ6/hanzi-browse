@@ -6,6 +6,7 @@
 import { LIMITS } from '../modules/constants.js';
 
 const LOG_KEY = 'agent_log';
+const taskDebugLogs = new Map();
 
 /**
  * Log state - shared reference that will be passed from service worker
@@ -18,6 +19,27 @@ let taskDebugLog = [];
  */
 export function initLogging(debugLogRef) {
   taskDebugLog = debugLogRef;
+}
+
+export function registerTaskLogging(sessionId, debugLogRef) {
+  if (!sessionId) return;
+  taskDebugLogs.set(sessionId, debugLogRef);
+}
+
+export function unregisterTaskLogging(sessionId) {
+  if (!sessionId) return;
+  taskDebugLogs.delete(sessionId);
+}
+
+function getTaskDebugLog(sessionId) {
+  if (sessionId && taskDebugLogs.has(sessionId)) {
+    return taskDebugLogs.get(sessionId);
+  }
+  return taskDebugLog;
+}
+
+function getLogStorageKey(sessionId) {
+  return sessionId ? `${LOG_KEY}_${sessionId}` : LOG_KEY;
 }
 
 /**
@@ -63,7 +85,8 @@ function sanitizeForLogging(data) {
  * @param {*} [data] - Optional data to include in log (will be JSON stringified)
  * @returns {Promise<void>}
  */
-export async function log(type, message, data = null) {
+export async function log(type, message, data = null, options = {}) {
+  const { sessionId } = options;
   const sanitizedData = sanitizeForLogging(data);
   const entry = {
     time: new Date().toISOString(),
@@ -74,21 +97,30 @@ export async function log(type, message, data = null) {
   console.log(`[${type}] ${message}`, data || '');
 
   // Also collect in taskDebugLog for saving to file
-  taskDebugLog.push(entry);
+  getTaskDebugLog(sessionId).push(entry);
 
-  // Save to storage
-  const stored = await chrome.storage.local.get([LOG_KEY]);
-  const existingLog = stored[LOG_KEY] || [];
-  const newLog = [...existingLog, entry].slice(-LIMITS.LOG_ENTRIES);
-  await chrome.storage.local.set({ [LOG_KEY]: newLog });
+  // Persist to extension storage opportunistically.
+  // Logging must never block the agent loop; a slow/corrupt LevelDB should
+  // degrade visible logs, not freeze browser automation at "thinking".
+  const logKey = getLogStorageKey(sessionId);
+  void chrome.storage.local.get([logKey]).then((stored) => {
+    const existingLog = stored[logKey] || [];
+    const newLog = [...existingLog, entry].slice(-LIMITS.LOG_ENTRIES);
+    return chrome.storage.local.set({ [logKey]: newLog });
+  }).catch((error) => {
+    console.warn('[Logging] Failed to persist log entry:', error?.message || error);
+  });
 }
 
 /**
  * Clear all logs from storage
  * @returns {Promise<void>}
  */
-export async function clearLog() {
-  await chrome.storage.local.set({ [LOG_KEY]: [] });
+export async function clearLog(options = {}) {
+  const { sessionId } = options;
+  const debugLog = getTaskDebugLog(sessionId);
+  debugLog.length = 0;
+  await chrome.storage.local.set({ [getLogStorageKey(sessionId)]: [] });
 }
 
 /**
@@ -203,17 +235,21 @@ function buildTurnsFromDebugLog(debugLog) {
  * @param {Array<string>} [screenshots] - Array of screenshot data URLs
  * @returns {Promise<void>}
  */
-export async function saveTaskLogs(taskData, screenshots = []) {
+export async function saveTaskLogs(taskData, screenshots = [], options = {}) {
   try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const folder = `browser-agent/${timestamp}`;
+    const sessionId = options.sessionId || taskData.sessionId || null;
+    const scopedDebugLog = getTaskDebugLog(sessionId);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const folderName = sessionId ? `${timestamp}-${sessionId}` : timestamp;
+    const folder = `browser-agent/${folderName}`;
 
     // Build clean log format
     // Build turns from debug log (complete history) instead of compressed messages
-    const turns = buildTurnsFromDebugLog(taskDebugLog);
+    const turns = buildTurnsFromDebugLog(scopedDebugLog);
 
     const cleanLog = {
       task: taskData.task,
+      sessionId,
       status: taskData.status,
       startTime: taskData.startTime,
       endTime: taskData.endTime,
@@ -223,7 +259,7 @@ export async function saveTaskLogs(taskData, screenshots = []) {
       usage: taskData.usage || null,
       turns: turns,
       screenshots: screenshots.map((_, i) => `screenshot_${i + 1}.png`),
-      debug: filterDebugLog(taskDebugLog), // Filter redundant entries for cleaner logs
+      debug: filterDebugLog(scopedDebugLog), // Filter redundant entries for cleaner logs
       error: taskData.error || null,
     };
 

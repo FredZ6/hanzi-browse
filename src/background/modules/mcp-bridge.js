@@ -2,22 +2,18 @@
  * MCP Bridge Module
  *
  * Enables communication between MCP server and the Chrome extension.
- * Primary: WebSocket relay (ws://localhost:7862) for real-time messaging.
- * Fallback: Native host file-based IPC polling when WebSocket is unavailable.
+ * Uses the WebSocket relay (ws://localhost:7862) for MCP task traffic.
  *
  * The service worker can sleep at any time, dropping the WebSocket.
- * On wake, connectToRelay() reconnects. During disconnection, native
- * messaging polling keeps things working.
+ * On wake, connectToRelay() reconnects and the relay delivers queued task
+ * commands. Native host is still used for debug logging and legacy auth flows,
+ * but not for MCP task transport.
  */
 
 
 const NATIVE_HOST_NAME = 'com.hanzi_in_chrome.oauth_host';
-const POLL_INTERVAL_MS = 500;
 const WS_RELAY_URL = 'ws://localhost:7862';
 const WS_RECONNECT_DELAY_MS = 5000;
-
-let pollInterval = null;
-let isPolling = false;
 
 // WebSocket connection to relay server
 let relaySocket = null;
@@ -25,6 +21,7 @@ let wsReconnectTimer = null;
 
 // Active MCP sessions
 const mcpSessions = new Map();
+const pendingResponseOwners = new Map();
 
 // Pending get_info requests (waiting for MCP server response)
 // Map<requestId, { resolve: Function, reject: Function, timeout: NodeJS.Timeout }>
@@ -37,8 +34,9 @@ const pendingEscalateRequests = new Map();
 let escalateRequestCounter = 0;
 
 // Pending relay requests (for direct relay responses like read_credentials)
-// Map<responseType, { resolve, reject, timeout }>
+// Map<requestId, { resolve, reject, timeout, responseType }>
 const pendingRelayRequests = new Map();
+let relayRequestCounter = 0;
 
 // Pending API proxy streams (relay proxies API calls with impersonation headers)
 // Map<requestId, { onChunk, resolve, reject, timeout }>
@@ -51,23 +49,15 @@ let onSendMessage = null;
 let onStopTask = null;
 let onScreenshot = null;
 
-// Callbacks for remote tool execution (MCP server-driven agent loop)
-let onCreateSession = null;
-let onExecuteTool = null;
-let onCloseSession = null;
-
 /**
  * Initialize MCP bridge with callbacks.
- * Tries WebSocket relay first, falls back to native host polling.
+ * MCP task transport requires the WebSocket relay.
  */
 export function initMcpBridge(callbacks) {
   onStartTask = callbacks.onStartTask;
   onSendMessage = callbacks.onSendMessage;
   onStopTask = callbacks.onStopTask;
   onScreenshot = callbacks.onScreenshot;
-  onCreateSession = callbacks.onCreateSession || null;
-  onExecuteTool = callbacks.onExecuteTool || null;
-  onCloseSession = callbacks.onCloseSession || null;
 
   console.log('[MCP Bridge] Initialized');
 
@@ -92,8 +82,7 @@ export function initMcpBridge(callbacks) {
 
 /**
  * Connect to the WebSocket relay server.
- * On success, stops native polling (WebSocket is faster and push-based).
- * On failure/disconnect, starts native polling as fallback and schedules reconnect.
+ * On failure/disconnect, schedules reconnect.
  */
 export function connectToRelay() {
   // Clear any pending reconnect
@@ -116,9 +105,6 @@ export function connectToRelay() {
 
       // Register as the extension client
       relaySocket.send(JSON.stringify({ type: 'register', role: 'extension' }));
-
-      // WebSocket is faster — stop polling to reduce overhead
-      stopMcpPolling();
     };
 
     relaySocket.onmessage = (event) => {
@@ -134,12 +120,14 @@ export function connectToRelay() {
         }
 
         // Check for pending relay request responses (e.g., credentials_result)
-        if (pendingRelayRequests.has(message.type)) {
-          const pending = pendingRelayRequests.get(message.type);
-          clearTimeout(pending.timeout);
-          pendingRelayRequests.delete(message.type);
-          pending.resolve(message);
-          return;
+        if (message.requestId && pendingRelayRequests.has(message.requestId)) {
+          const pending = pendingRelayRequests.get(message.requestId);
+          if (!pending.responseType || pending.responseType === message.type) {
+            clearTimeout(pending.timeout);
+            pendingRelayRequests.delete(message.requestId);
+            pending.resolve(message);
+            return;
+          }
         }
 
         // Check for API proxy stream events (relay proxies API calls with impersonation headers)
@@ -175,10 +163,21 @@ export function connectToRelay() {
 
     relaySocket.onclose = () => {
       console.log('[MCP Bridge] WebSocket disconnected');
-      relaySocket = null;
 
-      // Fall back to native polling
-      startMcpPolling();
+      // Fail any in-flight relay operations so callers don't hang forever
+      for (const [requestId, pending] of pendingRelayRequests) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error('Relay disconnected before the request completed'));
+        pendingRelayRequests.delete(requestId);
+      }
+
+      for (const [requestId, pending] of pendingApiProxies) {
+        clearTimeout(pending.timeout);
+        pending.reject(new Error('Relay disconnected during API proxy request'));
+        pendingApiProxies.delete(requestId);
+      }
+
+      relaySocket = null;
 
       // Schedule reconnect
       wsReconnectTimer = setTimeout(() => {
@@ -192,8 +191,6 @@ export function connectToRelay() {
     };
   } catch (e) {
     console.log('[MCP Bridge] WebSocket connection failed:', e.message);
-    // Ensure polling is running as fallback
-    startMcpPolling();
 
     // Schedule reconnect
     wsReconnectTimer = setTimeout(() => {
@@ -220,12 +217,7 @@ function normalizeIncomingMessage(message) {
     'mcp_screenshot': 'screenshot',
     'mcp_get_info_response': 'get_info_response',
     'mcp_escalate_response': 'escalate_response',
-    'mcp_poll_results': null, // Not applicable over WebSocket (push-based)
     'llm_request': 'llm_request',
-    // Remote tool execution (MCP server-driven agent loop)
-    'mcp_create_session': 'create_session',
-    'mcp_execute_tool': 'execute_tool',
-    'mcp_close_session': 'close_session',
   };
 
   const mappedType = typeMap[type];
@@ -248,67 +240,38 @@ export function isRelayConnected() {
   return relaySocket && relaySocket.readyState === WebSocket.OPEN;
 }
 
-/**
- * Start polling for MCP commands
- */
-export function startMcpPolling() {
-  if (pollInterval) return;
-
-  console.log('[MCP Bridge] Starting polling');
-  pollInterval = setInterval(pollForCommands, POLL_INTERVAL_MS);
+function getSourceClientId(sessionId) {
+  if (!sessionId) return null;
+  return (
+    mcpSessions.get(sessionId)?.sourceClientId ||
+    pendingResponseOwners.get(sessionId) ||
+    null
+  );
 }
 
-/**
- * Stop polling
- */
-export function stopMcpPolling() {
-  if (pollInterval) {
-    clearInterval(pollInterval);
-    pollInterval = null;
+function withSourceClientId(sessionId, message, { clearPending = false } = {}) {
+  const sourceClientId = getSourceClientId(sessionId);
+  if (sourceClientId) {
+    message.sourceClientId = sourceClientId;
   }
-  console.log('[MCP Bridge] Stopped polling');
+  if (clearPending && sessionId) {
+    pendingResponseOwners.delete(sessionId);
+  }
+  return message;
 }
 
-/**
- * Poll native host for MCP commands
- */
-async function pollForCommands() {
-  if (isPolling) return;
-  isPolling = true;
-
-  try {
-    const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-
-    const result = await new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        port.disconnect();
-        resolve(null);
-      }, 1000);
-
-      port.onMessage.addListener((message) => {
-        clearTimeout(timeout);
-        port.disconnect();
-        resolve(message);
-      });
-
-      port.onDisconnect.addListener(() => {
-        clearTimeout(timeout);
-        resolve(null);
-      });
-
-      port.postMessage({ type: 'poll_mcp_inbox' });
-    });
-
-    if (result?.type === 'mcp_commands' && result.commands?.length > 0) {
-      for (const cmd of result.commands) {
-        await handleMcpCommand(cmd);
-      }
-    }
-  } catch (e) {
-    // Silent fail - native host might not be available
-  } finally {
-    isPolling = false;
-  }
+function ensureBridgeSession(sessionId, data = {}) {
+  if (!sessionId) return null;
+  const existing = mcpSessions.get(sessionId) || {};
+  const next = {
+    status: existing.status || 'running',
+    context: existing.context,
+    sourceClientId: existing.sourceClientId || null,
+    ...existing,
+    ...data,
+  };
+  mcpSessions.set(sessionId, next);
+  return next;
 }
 
 /**
@@ -318,36 +281,62 @@ async function handleMcpCommand(command) {
   console.log('[MCP Bridge] Received command:', command.type, command.sessionId);
 
   switch (command.type) {
-    case 'start_task':
-      if (onStartTask) {
-        debugLog('Adding session to mcpSessions', command.sessionId);
-        mcpSessions.set(command.sessionId, { status: 'starting', context: command.context });
-        debugLog('mcpSessions now has', Array.from(mcpSessions.keys()));
-        onStartTask(command.sessionId, command.task, command.url, command.context, command.licenseKey);
+    case 'start_task': {
+      if (!onStartTask) break;
+
+      // Idempotency guard: if this session is already starting or running,
+      // ignore the duplicate start_task (e.g., from relay queue replay on reconnect).
+      const existingSession = mcpSessions.get(command.sessionId);
+      if (existingSession && (existingSession.status === 'starting' || existingSession.status === 'running')) {
+        debugLog('Ignoring duplicate start_task for already-active session', command.sessionId);
+        break;
       }
+
+      debugLog('Adding session to mcpSessions', command.sessionId);
+      mcpSessions.set(command.sessionId, {
+        status: 'starting',
+        context: command.context,
+        sourceClientId: command.sourceClientId || null,
+      });
+      debugLog('mcpSessions now has', Array.from(mcpSessions.keys()));
+      onStartTask(command.sessionId, command.task, command.url, command.context, command.licenseKey);
       break;
+    }
 
     case 'send_message':
       // Allow send_message even if session is complete/error (for continuation)
       // The service worker will validate if the session actually exists
       if (onSendMessage) {
+        ensureBridgeSession(command.sessionId, {
+          sourceClientId: command.sourceClientId || getSourceClientId(command.sessionId),
+        });
         onSendMessage(command.sessionId, command.message);
       }
       break;
 
     case 'stop_task':
-      if (onStopTask && mcpSessions.has(command.sessionId)) {
+      if (onStopTask) {
+        ensureBridgeSession(command.sessionId, {
+          sourceClientId: command.sourceClientId || getSourceClientId(command.sessionId),
+        });
         const shouldRemove = command.remove === true;
         onStopTask(command.sessionId, shouldRemove);
         // Only delete from bridge if removing completely
         if (shouldRemove) {
           mcpSessions.delete(command.sessionId);
+          pendingResponseOwners.delete(command.sessionId);
         }
       }
       break;
 
     case 'screenshot':
       if (onScreenshot) {
+        ensureBridgeSession(command.sessionId, {
+          sourceClientId: command.sourceClientId || getSourceClientId(command.sessionId),
+        });
+        if (command.sourceClientId) {
+          pendingResponseOwners.set(command.sessionId, command.sourceClientId);
+        }
         onScreenshot(command.sessionId);
       }
       break;
@@ -385,25 +374,6 @@ async function handleMcpCommand(command) {
       debugLog('llm_request received', { requestId: command.requestId, prompt: command.prompt?.substring(0, 50) });
       handleLLMRequest(command);
       break;
-
-    // Remote tool execution (MCP server-driven agent loop)
-    case 'create_session':
-      if (onCreateSession) {
-        onCreateSession(command.sessionId, command.url);
-      }
-      break;
-
-    case 'execute_tool':
-      if (onExecuteTool) {
-        onExecuteTool(command.sessionId, command.toolName, command.toolInput, command.toolUseId);
-      }
-      break;
-
-    case 'close_session':
-      if (onCloseSession) {
-        onCloseSession(command.sessionId);
-      }
-      break;
   }
 }
 
@@ -432,13 +402,16 @@ export function sendMcpUpdate(sessionId, status, step) {
 
   mcpSessions.get(sessionId).status = status;
 
-  sendToNativeHost({
+  if (!sendToMcpRelay(withSourceClientId(sessionId, {
     type: 'mcp_task_update',
     sessionId,
     status,
     step,
-  });
-  debugLog('Update sent to native host');
+  }))) {
+    console.warn('[MCP Bridge] Dropped task update because relay is disconnected', { sessionId, status });
+    return;
+  }
+  debugLog('Update sent to relay');
 }
 
 /**
@@ -450,11 +423,13 @@ export function sendMcpComplete(sessionId, result) {
     mcpSessions.get(sessionId).status = 'complete';
   }
 
-  sendToNativeHost({
+  if (!sendToMcpRelay(withSourceClientId(sessionId, {
     type: 'mcp_task_complete',
     sessionId,
     result,
-  });
+  }))) {
+    console.warn('[MCP Bridge] Dropped task completion because relay is disconnected', { sessionId });
+  }
 }
 
 /**
@@ -466,22 +441,26 @@ export function sendMcpError(sessionId, error) {
     mcpSessions.get(sessionId).status = 'error';
   }
 
-  sendToNativeHost({
+  if (!sendToMcpRelay(withSourceClientId(sessionId, {
     type: 'mcp_task_error',
     sessionId,
     error,
-  });
+  }))) {
+    console.warn('[MCP Bridge] Dropped task error because relay is disconnected', { sessionId });
+  }
 }
 
 /**
  * Send screenshot to MCP server
  */
 export function sendMcpScreenshot(sessionId, data) {
-  sendToNativeHost({
+  if (!sendToMcpRelay(withSourceClientId(sessionId, {
     type: 'mcp_screenshot_result',
     sessionId,
     data,
-  });
+  }, { clearPending: true }))) {
+    console.warn('[MCP Bridge] Dropped screenshot response because relay is disconnected', { sessionId });
+  }
 }
 
 /**
@@ -510,13 +489,18 @@ export function queryMemory(sessionId, query, timeoutMs = 10000) {
     // Store the pending request
     pendingGetInfoRequests.set(requestId, { resolve, reject, timeout });
 
-    // Send request to MCP server via native host
-    sendToNativeHost({
+    // Send request to MCP server via relay
+    if (!sendToMcpRelay(withSourceClientId(sessionId, {
       type: 'mcp_get_info',
       sessionId,
       query,
       requestId,
-    });
+    }))) {
+      clearTimeout(timeout);
+      pendingGetInfoRequests.delete(requestId);
+      resolve(`Information lookup unavailable because the MCP relay is disconnected. Use the provided task context directly if possible.`);
+      return;
+    }
 
     debugLog('get_info request sent', { sessionId, query, requestId });
   });
@@ -544,14 +528,19 @@ export function sendEscalation(sessionId, problem, whatITried, whatINeed, timeou
 
     pendingEscalateRequests.set(requestId, { resolve, timeout });
 
-    sendToNativeHost({
+    if (!sendToMcpRelay(withSourceClientId(sessionId, {
       type: 'mcp_escalate',
       sessionId,
       requestId,
       problem,
       whatITried: whatITried || '',
       whatINeed,
-    });
+    }))) {
+      clearTimeout(timeout);
+      pendingEscalateRequests.delete(requestId);
+      resolve('Escalation unavailable because the MCP relay is disconnected. Continue with your best judgment or request the missing information explicitly.');
+      return;
+    }
 
     debugLog('escalate request sent', { sessionId, problem, requestId });
   });
@@ -601,61 +590,29 @@ async function handleLLMRequest(command) {
     // Extract text content from Anthropic Messages API response
     const content = result.content?.find(b => b.type === 'text')?.text || '';
 
-    sendToNativeHost({
+    if (!sendToMcpRelay({
       type: 'mcp_llm_response',
       requestId,
       content,
       usage: result.usage,
-    });
+    })) {
+      console.warn('[MCP Bridge] Dropped llm_response because relay is disconnected', { requestId });
+    }
 
     debugLog('llm_request completed', { requestId, contentLength: content.length });
   } catch (error) {
     console.error('[MCP Bridge] LLM request failed:', error);
 
-    sendToNativeHost({
+    if (!sendToMcpRelay({
       type: 'mcp_llm_response',
       requestId,
       error: error.message || 'LLM request failed',
-    });
+    })) {
+      console.warn('[MCP Bridge] Dropped llm_response error because relay is disconnected', { requestId });
+    }
 
     debugLog('llm_request failed', { requestId, error: error.message });
   }
-}
-
-/**
- * Send session_created result to MCP server
- */
-export function sendSessionCreated(sessionId, tabId, windowId, error = null) {
-  sendToNativeHost({
-    type: 'mcp_session_created',
-    sessionId,
-    tabId,
-    windowId,
-    error,
-  });
-}
-
-/**
- * Send tool_result to MCP server
- */
-export function sendToolResult(sessionId, toolUseId, content, error = null) {
-  sendToNativeHost({
-    type: 'mcp_tool_result',
-    sessionId,
-    toolUseId,
-    content,
-    error,
-  });
-}
-
-/**
- * Send session_closed to MCP server
- */
-export function sendSessionClosed(sessionId) {
-  sendToNativeHost({
-    type: 'mcp_session_closed',
-    sessionId,
-  });
 }
 
 /**
@@ -666,31 +623,17 @@ export function getMcpSession(sessionId) {
 }
 
 /**
- * Send message to MCP server/CLI.
- * Routes through WebSocket relay when connected, falls back to native host.
+ * Send message to MCP server/CLI over the WebSocket relay.
+ * MCP task transport requires relay connectivity.
  */
-function sendToNativeHost(message) {
-  // Try WebSocket first (real-time, no file I/O)
-  if (relaySocket && relaySocket.readyState === WebSocket.OPEN) {
-    try {
-      // Normalize outgoing message types for the relay
-      // The relay broadcasts to all MCP/CLI consumers
-      const wsMessage = normalizeOutgoingMessage(message);
-      relaySocket.send(JSON.stringify(wsMessage));
-      return;
-    } catch (e) {
-      console.warn('[MCP Bridge] WebSocket send failed, falling back to native host:', e.message);
-    }
+function sendToMcpRelay(message) {
+  if (!relaySocket || relaySocket.readyState !== WebSocket.OPEN) {
+    return false;
   }
 
-  // Fall back to native host (file-based IPC)
-  try {
-    const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
-    port.postMessage(message);
-    setTimeout(() => port.disconnect(), 100);
-  } catch (e) {
-    console.error('[MCP Bridge] Send error:', e);
-  }
+  const wsMessage = normalizeOutgoingMessage(message);
+  relaySocket.send(JSON.stringify(wsMessage));
+  return true;
 }
 
 /**
@@ -712,10 +655,6 @@ function normalizeOutgoingMessage(message) {
     'mcp_get_info': 'mcp_get_info',
     'mcp_escalate': 'mcp_escalate',
     'mcp_llm_response': 'llm_response',
-    // Remote tool execution responses
-    'mcp_session_created': 'session_created',
-    'mcp_tool_result': 'tool_result',
-    'mcp_session_closed': 'session_closed',
   };
 
   const mappedType = typeMap[type] || type;
@@ -752,13 +691,14 @@ export function relayRequest(message, responseType, timeoutMs = 10000) {
       return;
     }
 
+    const requestId = message.requestId || `relay_${Date.now()}_${++relayRequestCounter}`;
     const timeout = setTimeout(() => {
-      pendingRelayRequests.delete(responseType);
+      pendingRelayRequests.delete(requestId);
       reject(new Error('Relay request timed out'));
     }, timeoutMs);
 
-    pendingRelayRequests.set(responseType, { resolve, reject, timeout });
-    relaySocket.send(JSON.stringify(message));
+    pendingRelayRequests.set(requestId, { resolve, reject, timeout, responseType });
+    relaySocket.send(JSON.stringify({ ...message, requestId }));
   });
 }
 

@@ -22,6 +22,30 @@ export function App() {
     );
   }
 
+  // If onboarding not completed, show a prompt to complete setup
+  if (!config.onboarding.completed) {
+    return (
+      <div class="app">
+        <div class="empty-state">
+          <div class="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+          </div>
+          <h2>Welcome to Hanzi</h2>
+          <p>Complete setup to get started.</p>
+          <button
+            class="btn btn-primary"
+            onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL('dist/onboarding.html') })}
+          >
+            Open Setup
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const hasMessages = chat.messages.length > 0;
 
   return (
@@ -37,7 +61,7 @@ export function App() {
 
       <div class="messages-container">
         {!hasMessages ? (
-          <EmptyState onSelectExample={setSuggestedText} />
+          <EmptyState onSelectExample={setSuggestedText} primaryMode={config.onboarding.primaryMode} />
         ) : (
           <MessageList
             messages={chat.messages}
@@ -56,6 +80,7 @@ export function App() {
         hasModels={config.availableModels.length > 0}
         suggestedText={suggestedText}
         onClearSuggestion={() => setSuggestedText('')}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {isSettingsOpen && (

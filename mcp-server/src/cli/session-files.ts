@@ -36,6 +36,10 @@ export function getSessionLogPath(sessionId: string): string {
   return join(SESSION_DIR, `${sessionId}.log`);
 }
 
+export function getSessionScreenshotPath(sessionId: string): string {
+  return join(SESSION_DIR, `${sessionId}.png`);
+}
+
 export function writeSessionStatus(sessionId: string, status: Partial<SessionFileStatus>): void {
   ensureSessionDir();
 
