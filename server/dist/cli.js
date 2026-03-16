@@ -16,6 +16,8 @@
 import { existsSync, readFileSync, mkdirSync, watch, writeFileSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { WebSocketClient } from './ipc/websocket-client.js';
 import { writeSessionStatus, readSessionStatus, appendSessionLog, listSessions, deleteSessionFiles, getSessionLogPath, getSessionScreenshotPath, } from './cli/session-files.js';
 // Parse command line arguments
@@ -94,19 +96,45 @@ function disconnectAndExit(code = 0) {
     setTimeout(() => process.exit(code), 100);
 }
 // --- Commands ---
+function loadSkillPrompt(skillName) {
+    // Resolve relative to package root: dist/cli.js → ../skills/<name>/SKILL.md
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const skillPath = join(__dirname, '..', 'skills', skillName, 'SKILL.md');
+    if (!existsSync(skillPath))
+        return null;
+    const content = readFileSync(skillPath, 'utf-8');
+    // Strip frontmatter
+    return content.replace(/^---[\s\S]*?---\n*/m, '').trim();
+}
 async function cmdStart() {
     const task = args[1];
     if (!task) {
-        console.error('Usage: hanzi-browser start "task description" [--url URL] [--context TEXT]');
+        console.error('Usage: hanzi-browser start "task description" [--url URL] [--context TEXT] [--skill NAME]');
         process.exit(1);
     }
     let url;
     let context;
+    let skill;
     for (let i = 2; i < args.length; i++) {
         if (args[i] === '--url' || args[i] === '-u')
             url = args[++i];
         else if (args[i] === '--context' || args[i] === '-c')
             context = args[++i];
+        else if (args[i] === '--skill' || args[i] === '-s')
+            skill = args[++i];
+    }
+    // Inject skill prompt as context
+    if (skill) {
+        const skillPrompt = loadSkillPrompt(skill);
+        if (!skillPrompt) {
+            console.error(`Unknown skill: ${skill}`);
+            console.error(`Available: ${SKILL_REGISTRY.map(s => s.name).join(', ')}`);
+            process.exit(1);
+        }
+        context = context
+            ? `${skillPrompt}\n\n---\n\nAdditional context: ${context}`
+            : skillPrompt;
     }
     console.log('[CLI] Starting browser task...');
     console.log(`  Task: ${task}`);
@@ -351,6 +379,7 @@ Commands:
   start <task>              Start a browser automation task
     --url, -u <url>         Starting URL
     --context, -c <text>    Context information for the task
+    --skill, -s <name>      Use a bundled skill (e.g. linkedin-prospector)
                             Blocks until complete or timeout.
                             You can run multiple start commands in parallel.
                             Each session gets its own browser window.
