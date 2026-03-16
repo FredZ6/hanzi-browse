@@ -1,5 +1,18 @@
 #!/usr/bin/env node
 
+// If invoked as `npx hanzi-in-chrome setup`, delegate to the CLI
+if (process.argv[2] === 'setup') {
+  const { fileURLToPath } = await import('url');
+  const { dirname, join } = await import('path');
+  const { execFileSync } = await import('child_process');
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const cliPath = join(__dirname, 'cli.js');
+  try {
+    execFileSync(process.execPath, [cliPath, ...process.argv.slice(2)], { stdio: 'inherit' });
+  } catch { /* exit code propagated */ }
+  process.exit(0);
+}
+
 /**
  * Hanzi in Chrome MCP Server
  *
