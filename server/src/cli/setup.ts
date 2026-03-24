@@ -13,6 +13,11 @@ import { createInterface } from 'readline';
 import { randomUUID } from 'crypto';
 import { isRelayRunning } from '../relay/auto-start.js';
 import { WebSocketClient } from '../ipc/websocket-client.js';
+import {
+  detectCredentialSources as detectSources,
+  checkCredentialFlowResult,
+  type DetectOptions,
+} from './detect-credentials.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -374,14 +379,23 @@ async function sendToExtension(type: string, payload: any): Promise<boolean> {
 
 // ── Credential setup ──────────────────────────────────────────────────
 
-function detectCredentialSources(): { name: string; slug: string; path: string }[] {
-  const home = homedir();
-  const found: { name: string; slug: string; path: string }[] = [];
-  const claudePath = join(home, '.claude', '.credentials.json');
-  if (existsSync(claudePath)) found.push({ name: 'Claude Code', slug: 'claude', path: claudePath });
-  const codexPath = join(home, '.codex', 'auth.json');
-  if (existsSync(codexPath)) found.push({ name: 'Codex CLI', slug: 'codex', path: codexPath });
-  return found;
+function keychainHas(service: string): boolean {
+  if (platform() !== 'darwin') return false;
+  try {
+    execSync(`security find-generic-password -s "${service}" -w 2>/dev/null`, { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function detectCredentialSources() {
+  return detectSources({
+    platform: platform(),
+    homedir: homedir(),
+    fileExists: existsSync,
+    keychainHas,
+  });
 }
 
 async function promptCredentials(): Promise<void> {
@@ -400,6 +414,9 @@ async function promptCredentials(): Promise<void> {
 
   // Auto-detect
   const sources = detectCredentialSources();
+  let anyImported = false;
+  let manualEntryChosen = false;
+
   if (sources.length > 0) {
     console.log('');
     for (const source of sources) {
@@ -415,6 +432,7 @@ async function promptCredentials(): Promise<void> {
           ? `${c.green('✓')}  ${source.name} imported`
           : `${c.yellow('●')}  Could not sync — import from Chrome extension instead`
         );
+        if (sent) anyImported = true;
       }
     }
   }
@@ -437,6 +455,7 @@ async function promptCredentials(): Promise<void> {
     const choice = await ask('(1/2/d): ');
 
     if (choice === '1') {
+      manualEntryChosen = true;
       console.log('');
       console.log(`     ${c.bold('a')} Anthropic  ${c.bold('o')} OpenAI  ${c.bold('g')} Google  ${c.bold('r')} OpenRouter`);
       console.log('');
@@ -455,6 +474,7 @@ async function promptCredentials(): Promise<void> {
         }
       }
     } else if (choice === '2') {
+      manualEntryChosen = true;
       console.log('');
       const name = await ask('Display name (e.g. "Ollama Llama 3"): ');
       if (name) {
@@ -475,6 +495,17 @@ async function promptCredentials(): Promise<void> {
     } else {
       break;
     }
+  }
+
+  // Warn if the user went through setup but configured nothing
+  const flowResult = checkCredentialFlowResult({
+    sourcesDetected: sources.length,
+    anyImported,
+    manualEntryChosen,
+  });
+  if (flowResult.isErr()) {
+    console.log('');
+    console.log(`  ${c.yellow('●')}  ${flowResult.error}`);
   }
 
   if (relay) {

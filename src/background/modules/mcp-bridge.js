@@ -15,6 +15,12 @@ const NATIVE_HOST_NAME = 'com.hanzi_in_chrome.oauth_host';
 const WS_RELAY_URL = 'ws://localhost:7862';
 const WS_RECONNECT_DELAY_MS = 5000;
 
+// Direct imports for credential handling (chrome.runtime.sendMessage cannot
+// message the service worker from within itself — "Receiving end does not exist")
+import { importCLICredentials } from './oauth-manager.js';
+import { importCodexCredentials } from './codex-oauth-manager.js';
+import { loadConfig } from './api.js';
+
 // WebSocket connection to relay server
 let relaySocket = null;
 let wsReconnectTimer = null;
@@ -385,20 +391,22 @@ async function handleMcpCommand(command) {
     }
 
     case 'import_credentials': {
-      // CLI setup wizard requests credential import (Claude Code or Codex)
+      // CLI setup wizard requests credential import (Claude Code or Codex).
+      // Calls the import functions directly — chrome.runtime.sendMessage()
+      // cannot message the service worker from within itself.
       const source = command.source; // 'claude' or 'codex'
       console.log('[MCP Bridge] import_credentials:', source);
       try {
-        if (source === 'claude') {
-          const result = await chrome.runtime.sendMessage({ type: 'IMPORT_CLI_CREDENTIALS' });
-          if (command.requestId) {
-            sendToMcpRelay({ type: 'credentials_imported', requestId: command.requestId, ...result });
-          }
-        } else if (source === 'codex') {
-          const result = await chrome.runtime.sendMessage({ type: 'IMPORT_CODEX_CREDENTIALS' });
-          if (command.requestId) {
-            sendToMcpRelay({ type: 'credentials_imported', requestId: command.requestId, ...result });
-          }
+        const importFn = source === 'claude' ? importCLICredentials
+                       : source === 'codex'  ? importCodexCredentials
+                       : null;
+        if (!importFn) {
+          throw new Error(`Unknown credential source: ${source}`);
+        }
+        const credentials = await importFn();
+        await loadConfig();
+        if (command.requestId) {
+          sendToMcpRelay({ type: 'credentials_imported', requestId: command.requestId, success: true, credentials });
         }
       } catch (err) {
         console.error('[MCP Bridge] import_credentials error:', err);
