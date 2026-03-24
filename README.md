@@ -57,7 +57,7 @@ Embed browser automation in your product. Your app calls the Hanzi API, a real b
 ### How it works
 
 1. **Get an API key** — [sign in](https://api.hanzilla.co/api/auth/sign-in/social) to open your developer console, then create a key
-2. **Pair a browser** — create a pairing token, have your user enter it in the extension
+2. **Pair a browser** — create a pairing token, send your user a pairing link (`/pair/{token}`) — they click it and auto-pair
 3. **Run a task** — call the API with a task and a browser session ID
 4. **Get the result** — poll the task or use `runTask()` which blocks until done
 

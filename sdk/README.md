@@ -46,8 +46,10 @@ The browser you want to control needs the Hanzi Chrome extension installed and p
 // Your backend creates a pairing token
 const { pairingToken } = await client.createPairingToken();
 
-// The browser user enters the pairing token in the extension
-// (Settings → Managed → paste token → Connect)
+// Send the user a pairing link — they click it and their browser auto-pairs:
+// https://api.hanzilla.co/pair/{pairingToken}
+//
+// Or embed the hanzi-pair.js snippet in your app for one-click pairing.
 ```
 
 ### 3. Run tasks

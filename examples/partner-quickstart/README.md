@@ -23,7 +23,7 @@ Open http://localhost:3000.
 ## How it works
 
 1. **Generate pairing token** — your backend calls `POST /v1/browser-sessions/pair`
-2. **User enters token** — they paste it in the Chrome extension (Settings → Managed → paste → Connect)
+2. **User pairs browser** — send them a pairing link (`/pair/{token}`) or embed the `hanzi-pair.js` snippet. Their browser auto-pairs with one click.
 3. **Check sessions** — your backend calls `GET /v1/browser-sessions` to see connected browsers
 4. **Run a task** — your backend calls `POST /v1/tasks` with a task description and session ID
 5. **Show result** — poll `GET /v1/tasks/:id` until complete, then display the answer

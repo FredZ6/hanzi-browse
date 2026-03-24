@@ -154,8 +154,8 @@ const HTML = `<!DOCTYPE html>
       <!-- Step 1: Pair -->
       <div class="card">
         <div class="step-header"><span class="step-num">1</span> Connect a browser</div>
-        <p>Generate a pairing token. The user pastes it in the Hanzi Chrome extension (Settings → Managed tab → paste token → Connect).</p>
-        <button class="btn-primary" id="pair-btn" onclick="pair()">Generate pairing token</button>
+        <p>Generate a pairing link. Your user clicks it and their browser connects automatically.</p>
+        <button class="btn-primary" id="pair-btn" onclick="pair()">Generate pairing link</button>
         <div id="pair-result"></div>
       </div>
 
@@ -192,14 +192,15 @@ const HTML = `<!DOCTYPE html>
         const res = await fetch('/api/pair', { method: 'POST' });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
+        const pairUrl = '${BASE_URL}/pair/' + data.pairing_token;
         out.innerHTML =
-          '<div class="token-display">' + data.pairing_token + '</div>' +
-          '<p style="font-size:13px;color:#666;">Expires in ' + data.expires_in_seconds + ' seconds. Open the Hanzi extension → Settings → Managed tab → paste this token → Connect.</p>';
+          '<p style="margin-top:8px;"><a href="' + pairUrl + '" target="_blank" style="font-size:15px;font-weight:600;">' + pairUrl + '</a></p>' +
+          '<p style="font-size:13px;color:#666;">Send this link to your user. Expires in ' + data.expires_in_seconds + 's.</p>';
       } catch (err) {
         out.innerHTML = '<p class="error">' + err.message + '</p>';
       }
       btn.disabled = false;
-      btn.textContent = 'Generate pairing token';
+      btn.textContent = 'Generate pairing link';
     }
 
     async function checkSessions() {

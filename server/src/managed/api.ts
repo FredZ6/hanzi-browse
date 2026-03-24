@@ -705,6 +705,43 @@ async function handleRequest(
       return;
     }
 
+    // --- Serve landing pages locally (docs, etc.) ---
+    if (method === "GET" && (url === "/docs.html" || url?.startsWith("/docs.html"))) {
+      const landingDir = join(new URL(import.meta.url).pathname, "../../../../landing");
+      const filePath = join(landingDir, url === "/docs.html" || url?.startsWith("/docs.html") ? "docs.html" : "index.html");
+      if (existsSync(filePath)) {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(readFileSync(filePath));
+        return;
+      }
+    }
+
+    // --- Embeddable pairing snippet ---
+    if (method === "GET" && url === "/hanzi-pair.js") {
+      const snippetPath = join(new URL(import.meta.url).pathname, "../../../../sdk/hanzi-pair.js");
+      if (existsSync(snippetPath)) {
+        res.writeHead(200, {
+          "Content-Type": "application/javascript",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+        });
+        res.end(readFileSync(snippetPath));
+      } else {
+        res.writeHead(404);
+        res.end("Not found");
+      }
+      return;
+    }
+
+    // --- Hosted pairing page (/pair/:token) ---
+    const pairMatch = url?.match(/^\/pair\/(.+)$/);
+    if (method === "GET" && pairMatch) {
+      const token = pairMatch[1];
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(getPairingPageHtml(token, req.headers.host || ""));
+      return;
+    }
+
     // --- No-auth endpoints ---
 
     if (method === "GET" && url === "/v1/health") {
@@ -1026,4 +1063,91 @@ export async function shutdownManagedAPI(): Promise<void> {
   taskAborts.clear();
   taskWorkspaceMap.clear();
   log.info("Shutdown complete", undefined, { tasksAborted: runningCount });
+}
+
+// ─── Hosted Pairing Page ─────────────────────────────────
+
+function getPairingPageHtml(token: string, host: string): string {
+  const apiUrl = host.includes("localhost") ? `http://${host}` : `https://${host}`;
+  const extensionUrl = "https://chromewebstore.google.com/detail/hanzi-in-chrome/iklpkemlmbhemkiojndpbhoakgikpmcd";
+  // Escape token for safe embedding in HTML
+  const safeToken = token.replace(/[<>"'&]/g, "");
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect your browser — Hanzi</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f7f3ea; color: #1f1711; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; }
+    .card { max-width: 420px; width: 100%; background: #fffdf8; border: 1px solid #e5ddd0; border-radius: 16px; padding: 32px; text-align: center; }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    p { font-size: 15px; color: #6d6256; line-height: 1.6; margin-bottom: 20px; }
+    .status { padding: 16px; border-radius: 10px; margin-bottom: 16px; font-size: 14px; font-weight: 500; }
+    .status-connecting { background: #fceee4; color: #8d4524; }
+    .status-success { background: #e8f0ec; color: #2f4a3d; }
+    .status-error { background: #fce4e4; color: #c62828; }
+    .status-install { background: #f5f1e8; color: #6d6256; }
+    a { color: #ad5a34; font-weight: 600; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #e5ddd0; border-top-color: #ad5a34; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .small { font-size: 12px; color: #6d6256; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Connect your browser</h1>
+    <p>This will connect your Chrome browser so the app can run tasks in it securely.</p>
+    <div id="status" class="status status-connecting">
+      <span class="spinner"></span> Detecting Hanzi extension...
+    </div>
+    <p class="small">Powered by <a href="https://browse.hanzilla.co">Hanzi</a></p>
+  </div>
+
+  <script>
+    const TOKEN = "${safeToken}";
+    const API_URL = "${apiUrl}";
+    const EXTENSION_URL = "${extensionUrl}";
+    const statusEl = document.getElementById("status");
+
+    let extensionReady = false;
+
+    window.addEventListener("message", (e) => {
+      if (e.data?.type === "HANZI_EXTENSION_READY") {
+        extensionReady = true;
+        pair();
+      }
+      if (e.data?.type === "HANZI_PAIR_RESULT") {
+        if (e.data.success) {
+          statusEl.className = "status status-success";
+          statusEl.innerHTML = "✓ Browser connected! You can close this tab.";
+        } else {
+          statusEl.className = "status status-error";
+          statusEl.innerHTML = "Pairing failed: " + (e.data.error || "unknown error") + ". The token may have expired.";
+        }
+      }
+    });
+
+    function pair() {
+      statusEl.className = "status status-connecting";
+      statusEl.innerHTML = '<span class="spinner"></span> Connecting...';
+      window.postMessage({ type: "HANZI_PAIR", token: TOKEN, apiUrl: API_URL }, "*");
+    }
+
+    // Ping extension
+    window.postMessage({ type: "HANZI_PING" }, "*");
+
+    // If extension not detected after 2s, show install prompt
+    setTimeout(() => {
+      if (!extensionReady) {
+        statusEl.className = "status status-install";
+        statusEl.innerHTML = 'Hanzi extension not found. <a href="' + EXTENSION_URL + '" target="_blank">Install it here</a>, then reload this page.';
+      }
+    }, 2000);
+  </script>
+</body>
+</html>`;
 }

@@ -411,17 +411,30 @@ curl -X POST https://api.hanzilla.co/v1/tasks \
 
         <!-- ─── BROWSER PAIRING ─── -->
         <h2 id="pairing">Browser Pairing</h2>
-        <p>Pairing connects a user's real Chrome browser to your workspace so you can run tasks in it remotely.</p>
+        <p>Pairing connects a user's Chrome browser to your workspace. Users pair once — the session lasts 30 days and auto-reconnects on browser restart.</p>
 
+        <h3>How it works</h3>
         <ol class="steps">
-            <li>Your backend calls <code>POST /v1/browser-sessions/pair</code> to create a pairing token (valid 5 minutes)</li>
-            <li>Your UI shows the token to the user</li>
-            <li>The user opens the Hanzi Chrome extension → Settings → Managed tab → pastes the token → clicks Connect</li>
-            <li>The extension exchanges the token for a persistent session (30-day expiry)</li>
-            <li>Your backend can now run tasks against that session</li>
+            <li>Your backend calls <code>POST /v1/browser-sessions/pair</code> to get a pairing token</li>
+            <li>Show your user a link: <code>https://api.hanzilla.co/pair/{token}</code></li>
+            <li>User clicks the link → their browser auto-pairs → done</li>
         </ol>
 
-        <p>Sessions auto-reconnect on browser restart — no re-pairing needed. The extension stores the session token and re-registers with the relay automatically.</p>
+        <div class="code-block"><pre># Your backend generates the link:
+curl -X POST https://api.hanzilla.co/v1/browser-sessions/pair \
+  -H "Authorization: Bearer hic_live_..." \
+  -H "Content-Type: application/json" \
+  -d '{"label": "Dr. Smith", "external_user_id": "user_123"}'
+
+# Response:
+# { "pairing_token": "hic_pair_abc123...", "expires_in_seconds": 300 }
+
+# Give your user this link:
+# https://api.hanzilla.co/pair/hic_pair_abc123...</pre></div>
+
+        <p>The pairing page detects the Hanzi extension and pairs automatically. If the extension isn't installed, the user sees an "Install" button.</p>
+
+        <p>Sessions auto-reconnect on browser restart — no re-pairing needed. Use <code>label</code> and <code>external_user_id</code> to track which session belongs to which user.</p>
 
         <!-- ─── SESSION METADATA ─── -->
         <h2 id="session-metadata">Session Metadata</h2>

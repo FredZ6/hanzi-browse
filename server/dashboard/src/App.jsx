@@ -10,11 +10,16 @@ function CopyButton({ text, label = 'Copy' }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-  return (
-    <button class="btn-copy" onClick={copy}>
-      {copied ? '✓ Copied!' : label}
-    </button>
-  );
+  return <button class="btn-copy" onClick={copy}>{copied ? '✓ Copied!' : label}</button>;
+}
+
+function timeAgo(ts) {
+  if (!ts) return 'never';
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 // ─── App ─────────────────────────────────────────────
@@ -25,31 +30,18 @@ export function App() {
   const [keys, setKeys] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [usage, setUsage] = useState(null);
-  const [newKeyName, setNewKeyName] = useState('');
-  const [createdKey, setCreatedKey] = useState(null);
   const [error, setError] = useState(null);
+  const [tab, setTab] = useState('start');
 
   // Extension detection
   const [extensionReady, setExtensionReady] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [paired, setPaired] = useState(false);
 
-  const loadProfile = useCallback(async () => {
-    const r = await api('GET', '/v1/me');
-    if (r?.data) setProfile(r.data);
-  }, []);
-  const loadKeys = useCallback(async () => {
-    const r = await api('GET', '/v1/api-keys');
-    if (r) setKeys(r.data?.api_keys || []);
-  }, []);
-  const loadSessions = useCallback(async () => {
-    const r = await api('GET', '/v1/browser-sessions');
-    if (r) setSessions(r.data?.sessions || []);
-  }, []);
-  const loadUsage = useCallback(async () => {
-    const r = await api('GET', '/v1/usage');
-    if (r) setUsage(r.data);
-  }, []);
+  const loadProfile = useCallback(async () => { const r = await api('GET', '/v1/me'); if (r?.data) setProfile(r.data); }, []);
+  const loadKeys = useCallback(async () => { const r = await api('GET', '/v1/api-keys'); if (r) setKeys(r.data?.api_keys || []); }, []);
+  const loadSessions = useCallback(async () => { const r = await api('GET', '/v1/browser-sessions'); if (r) setSessions(r.data?.sessions || []); }, []);
+  const loadUsage = useCallback(async () => { const r = await api('GET', '/v1/usage'); if (r) setUsage(r.data); }, []);
 
   useEffect(() => {
     Promise.all([loadProfile(), loadKeys(), loadSessions(), loadUsage()]).then(() => setLoading(false));
@@ -57,14 +49,13 @@ export function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Extension detection via content script bridge
   useEffect(() => {
-    const handler = (event) => {
-      if (event.data?.type === 'HANZI_EXTENSION_READY') setExtensionReady(true);
-      if (event.data?.type === 'HANZI_PAIR_RESULT') {
+    const handler = (e) => {
+      if (e.data?.type === 'HANZI_EXTENSION_READY') setExtensionReady(true);
+      if (e.data?.type === 'HANZI_PAIR_RESULT') {
         setPairing(false);
-        if (event.data.success) { setPaired(true); loadSessions(); }
-        else setError('Pairing failed: ' + (event.data.error || 'unknown'));
+        if (e.data.success) { setPaired(true); loadSessions(); }
+        else setError('Pairing failed: ' + (e.data.error || 'unknown'));
       }
     };
     window.addEventListener('message', handler);
@@ -72,337 +63,380 @@ export function App() {
     return () => window.removeEventListener('message', handler);
   }, []);
 
-  const hasKeys = keys.length > 0;
-  const connectedSession = sessions.find(s => s.status === 'connected');
-  const hasConnected = !!connectedSession || paired;
-
   if (loading) return <LoadingSkeleton />;
 
   const firstName = profile?.user?.name?.split(' ')[0] || 'there';
   const workspaceName = profile?.workspace?.name || 'Your workspace';
+  const hasKeys = keys.length > 0;
+  const connectedSession = sessions.find(s => s.status === 'connected');
+  const hasConnected = !!connectedSession || paired;
 
   return (
     <div class="page">
       <div class="header">
         <div>
-          <h1>Hi, {firstName}</h1>
-          <div class="subtitle">{workspaceName}</div>
+          <h1>{workspaceName}</h1>
+          <div class="subtitle">Hi, {firstName}</div>
         </div>
         <button class="signout" onClick={signOut}>Sign out</button>
       </div>
 
-      {/* Setup */}
-      <div class="section-label">Get started</div>
-      <p class="section-desc">Set up your API key and connect a browser to test with. <a href="https://browse.hanzilla.co/docs.html#build-with-hanzi">Read how it works →</a></p>
+      <div class="tabs">
+        <button class={`tab ${tab === 'start' ? 'active' : ''}`} onClick={() => setTab('start')}>Getting Started</button>
+        <button class={`tab ${tab === 'sessions' ? 'active' : ''}`} onClick={() => setTab('sessions')}>Sessions{sessions.length > 0 && <span class="tab-count">{sessions.filter(s => s.status === 'connected').length}</span>}</button>
+        <button class={`tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
+      </div>
 
-      <StepKey
-        keys={keys}
-        newKeyName={newKeyName}
-        setNewKeyName={setNewKeyName}
-        createdKey={createdKey}
-        setCreatedKey={setCreatedKey}
-        onRefresh={loadKeys}
-        setError={setError}
-      />
-
-      {hasKeys && (
-        <StepPair
-          extensionReady={extensionReady}
-          pairing={pairing}
-          paired={paired}
-          setPairing={setPairing}
-          setPaired={setPaired}
-          setError={setError}
-          onPairSuccess={loadSessions}
+      {tab === 'start' && (
+        <GettingStartedTab
+          keys={keys} loadKeys={loadKeys} setError={setError}
+          extensionReady={extensionReady} pairing={pairing} paired={paired}
+          setPairing={setPairing} setPaired={setPaired}
+          hasKeys={hasKeys} hasConnected={hasConnected}
+          connectedSession={connectedSession} sessions={sessions}
+          loadSessions={loadSessions} loadUsage={loadUsage}
         />
       )}
 
-      {hasKeys && hasConnected && (
-        <StepTask
-          apiKey={createdKey || keys[0]?.key_prefix}
-          sessionId={connectedSession?.id}
-          onTaskComplete={loadUsage}
-        />
+      {tab === 'sessions' && (
+        <SessionsTab sessions={sessions} onRefresh={loadSessions} usage={usage} />
       )}
 
-      {/* Workspace (monitoring) */}
-      {sessions.length > 0 && (
-        <>
-          <div class="section-label" style={{ marginTop: 32 }}>Your workspace</div>
-          <SessionsCard sessions={sessions} onRefresh={loadSessions} />
-          <UsageCard usage={usage} />
-        </>
+      {tab === 'settings' && (
+        <SettingsTab keys={keys} loadKeys={loadKeys} setError={setError} profile={profile} />
       )}
 
-      {error && <div class="error-toast">{error}</div>}
+      {error && <div class="error-toast" onClick={() => setError(null)}>{error}</div>}
     </div>
   );
 }
 
-// ─── Step: API Key ───────────────────────────────────
+// ─── Getting Started Tab ─────────────────────────────
 
-function StepKey({ keys, newKeyName, setNewKeyName, createdKey, setCreatedKey, onRefresh, setError }) {
-  const createKey = async () => {
-    if (!newKeyName.trim()) return;
-    setError(null);
-    const r = await api('POST', '/v1/api-keys', { name: newKeyName.trim() });
-    if (!r) return;
-    if (r.status === 201) { setCreatedKey(r.data.key); setNewKeyName(''); await onRefresh(); }
-    else setError(r.data?.error || 'Failed to create key');
-  };
-  const deleteKey = async (id) => {
-    if (!confirm('Delete this API key?')) return;
-    await api('DELETE', `/v1/api-keys/${id}`);
-    setCreatedKey(null);
-    await onRefresh();
-  };
-
-  return (
-    <div class="card">
-      <div class="step-header-row">
-        <span class={`step-badge ${keys.length > 0 ? 'done' : 'active'}`}>{keys.length > 0 ? '✓' : '1'}</span>
-        <div>
-          <h3>API Key</h3>
-          <p class="step-explain">This authenticates your backend when calling the Hanzi API.</p>
-        </div>
-      </div>
-
-      {keys.map(k => (
-        <div class="key-row" key={k.id}>
-          <span><strong>{k.name}</strong> <code class="key-prefix">{k.key_prefix}</code></span>
-          <button class="btn-danger" onClick={() => deleteKey(k.id)}>Delete</button>
-        </div>
-      ))}
-
-      {createdKey && (
-        <div class="key-created">
-          <div class="mono-with-copy">
-            <div class="mono">{createdKey}</div>
-            <CopyButton text={createdKey} label="Copy key" />
-          </div>
-          <div class="warning">Save this key — it won't be shown again.</div>
-        </div>
-      )}
-
-      <div class="inline-form" style={{ marginTop: 8 }}>
-        <input value={newKeyName} onInput={e => setNewKeyName(e.target.value)}
-          placeholder="Key name (e.g. dev, production)" maxLength={100}
-          onKeyDown={e => e.key === 'Enter' && createKey()} />
-        <button class="btn-primary" onClick={createKey} disabled={!newKeyName.trim()}>
-          {keys.length === 0 ? 'Create key' : 'Add key'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Step: Pair Browser ──────────────────────────────
-
-function StepPair({ extensionReady, pairing, paired, setPairing, setPaired, setError, onPairSuccess }) {
-  const pairThisBrowser = async () => {
-    setError(null);
-    setPairing(true);
-    const r = await api('POST', '/v1/browser-sessions/pair', { label: 'Developer testing' });
-    if (!r || r.status !== 201) { setPairing(false); setError(r?.data?.error || 'Failed'); return; }
-    window.postMessage({ type: 'HANZI_PAIR', token: r.data.pairing_token, apiUrl: window.location.origin }, '*');
-    setTimeout(() => setPairing(p => { if (p) { setError('Extension did not respond. Try reloading the extension.'); return false; } return p; }), 5000);
-  };
-
-  if (paired) {
-    return (
-      <div class="card">
-        <div class="step-header-row">
-          <span class="step-badge done">✓</span>
-          <div>
-            <h3>Browser connected</h3>
-            <p class="step-explain">Your Chrome is connected as a test user. Hanzi can now run tasks in it.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div class="card">
-      <div class="step-header-row">
-        <span class="step-badge active">2</span>
-        <div>
-          <h3>Connect your browser</h3>
-          <p class="step-explain">Pair your own Chrome so you can test running tasks in it. In production, each of your users pairs their own browser.</p>
-        </div>
-      </div>
-
-      {extensionReady ? (
-        <div style={{ textAlign: 'center', padding: '8px 0' }}>
-          <button class="btn-primary btn-lg" onClick={pairThisBrowser} disabled={pairing}>
-            {pairing ? 'Connecting...' : 'Connect this browser'}
-          </button>
-          <div class="field-hint" style={{ marginTop: 6 }}>Extension detected — one click to connect.</div>
-        </div>
-      ) : (
-        <div class="pair-context">
-          <strong>Hanzi extension not detected.</strong>{' '}
-          <a href="https://chromewebstore.google.com/detail/hanzi-in-chrome/iklpkemlmbhemkiojndpbhoakgikpmcd" target="_blank" rel="noreferrer">Install it</a>, then reload this page.
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Step: Run Task ──────────────────────────────────
-
-function StepTask({ apiKey, sessionId, onTaskComplete }) {
-  const [taskInput, setTaskInput] = useState('Go to Hacker News and tell me the top 3 stories');
-  const [taskStatus, setTaskStatus] = useState(null); // null | 'running' | 'complete' | 'error'
+function GettingStartedTab({ keys, loadKeys, setError, extensionReady, pairing, paired, setPairing, setPaired, hasKeys, hasConnected, connectedSession, sessions, loadSessions, loadUsage }) {
+  const [newKeyName, setNewKeyName] = useState('');
+  const [createdKey, setCreatedKey] = useState(null);
+  const [taskInput, setTaskInput] = useState('Go to example.com and tell me the page title');
+  const [taskStatus, setTaskStatus] = useState(null);
   const [taskAnswer, setTaskAnswer] = useState('');
   const [taskSteps, setTaskSteps] = useState(0);
 
+  // Determine which phase we're in
+  const testComplete = taskStatus === 'complete';
+
+  const createKey = async () => {
+    if (!newKeyName.trim()) return;
+    const r = await api('POST', '/v1/api-keys', { name: newKeyName.trim() });
+    if (r?.status === 201) { setCreatedKey(r.data.key); setNewKeyName(''); await loadKeys(); }
+    else setError(r?.data?.error || 'Failed');
+  };
+
+  const pairBrowser = async () => {
+    setPairing(true);
+    const r = await api('POST', '/v1/browser-sessions/pair', { label: 'Developer testing' });
+    if (!r || r.status !== 201) { setPairing(false); setError(r?.data?.error || 'Failed'); return; }
+    window.postMessage({ type: 'HANZI_PAIR', token: r.data.pairing_token, apiUrl: location.origin }, '*');
+    setTimeout(() => setPairing(p => { if (p) { setError('Extension did not respond.'); return false; } return p; }), 5000);
+  };
+
   const runTask = async () => {
-    if (!taskInput.trim() || !sessionId) return;
-    setTaskStatus('running');
-    setTaskAnswer('');
-    setTaskSteps(0);
-
-    const r = await api('POST', '/v1/tasks', {
-      task: taskInput.trim(),
-      browser_session_id: sessionId,
-    });
-    if (!r || r.status !== 201) {
-      setTaskStatus('error');
-      setTaskAnswer(r?.data?.error || 'Failed to create task. Is your browser session connected?');
-      return;
-    }
-
+    const sid = connectedSession?.id || sessions.find(s => s.status === 'connected')?.id;
+    if (!taskInput.trim() || !sid) return;
+    setTaskStatus('running'); setTaskAnswer(''); setTaskSteps(0);
+    const r = await api('POST', '/v1/tasks', { task: taskInput.trim(), browser_session_id: sid });
+    if (!r || r.status !== 201) { setTaskStatus('error'); setTaskAnswer(r?.data?.error || 'Failed'); return; }
     const taskId = r.data.id;
-
-    // Poll until complete
     const deadline = Date.now() + 3 * 60 * 1000;
     while (Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 2000));
-      const status = await api('GET', `/v1/tasks/${taskId}`);
-      if (!status) break;
-      setTaskSteps(status.data?.steps || 0);
-      if (status.data?.status !== 'running') {
-        setTaskStatus(status.data?.status || 'error');
-        setTaskAnswer(status.data?.answer || 'No answer returned.');
-        if (onTaskComplete) onTaskComplete();
+      const s = await api('GET', `/v1/tasks/${taskId}`);
+      if (!s) break;
+      setTaskSteps(s.data?.steps || 0);
+      if (s.data?.status !== 'running') {
+        setTaskStatus(s.data?.status || 'error');
+        setTaskAnswer(s.data?.answer || 'No answer.');
+        loadUsage();
         return;
       }
     }
-    setTaskStatus('error');
-    setTaskAnswer('Task timed out after 3 minutes.');
+    setTaskStatus('error'); setTaskAnswer('Timed out after 3 minutes.');
   };
 
   return (
-    <div class="card">
-      <div class="step-header-row">
-        <span class={`step-badge ${taskStatus === 'complete' ? 'done' : 'active'}`}>
-          {taskStatus === 'complete' ? '✓' : '3'}
-        </span>
-        <div>
-          <h3>Run a test task</h3>
-          <p class="step-explain">Tell Hanzi what to do in your connected browser.</p>
+    <div>
+      {/* Phase 1: Test it yourself */}
+      <div class="section-label">Test it yourself</div>
+      <p class="section-desc">Try the full flow with your own browser.</p>
+
+      {/* Step 1: API Key */}
+      <div class="card">
+        <div class="step-row">
+          <span class={`step-badge ${hasKeys ? 'done' : 'active'}`}>{hasKeys ? '✓' : '1'}</span>
+          <div class="step-content">
+            <h3>API Key</h3>
+            <p class="step-explain">Authenticates your backend when calling the Hanzi API.</p>
+            {keys.map(k => (
+              <div class="key-row" key={k.id}>
+                <span><strong>{k.name}</strong> <code class="key-prefix">{k.key_prefix}</code></span>
+              </div>
+            ))}
+            {createdKey && (
+              <div class="key-created">
+                <div class="mono-with-copy"><div class="mono">{createdKey}</div><CopyButton text={createdKey} label="Copy key" /></div>
+                <div class="warning">Save this key — it won't be shown again.</div>
+              </div>
+            )}
+            {!hasKeys && (
+              <div class="inline-form">
+                <input value={newKeyName} onInput={e => setNewKeyName(e.target.value)} placeholder="Key name (e.g. dev)" maxLength={100} onKeyDown={e => e.key === 'Enter' && createKey()} />
+                <button class="btn-primary" onClick={createKey} disabled={!newKeyName.trim()}>Create key</button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {!taskStatus ? (
-        <>
-          <div class="inline-form">
-            <input value={taskInput} onInput={e => setTaskInput(e.target.value)}
-              placeholder="What should Hanzi do in the browser?"
-              onKeyDown={e => e.key === 'Enter' && runTask()} />
-            <button class="btn-primary" onClick={runTask} disabled={!taskInput.trim()}>Run</button>
+      {/* Step 2: Connect browser */}
+      {hasKeys && (
+        <div class="card">
+          <div class="step-row">
+            <span class={`step-badge ${hasConnected ? 'done' : 'active'}`}>{hasConnected ? '✓' : '2'}</span>
+            <div class="step-content">
+              <h3>{hasConnected ? 'Browser connected' : 'Connect your browser'}</h3>
+              <p class="step-explain">{hasConnected ? 'Your Chrome is paired for testing.' : 'Pair your own Chrome to test tasks in it.'}</p>
+              {!hasConnected && extensionReady && (
+                <button class="btn-primary" onClick={pairBrowser} disabled={pairing}>{pairing ? 'Connecting...' : 'Connect this browser'}</button>
+              )}
+              {!hasConnected && !extensionReady && (
+                <p class="step-explain"><a href="https://chromewebstore.google.com/detail/hanzi-in-chrome/iklpkemlmbhemkiojndpbhoakgikpmcd" target="_blank">Install the Hanzi extension</a>, then reload this page.</p>
+              )}
+            </div>
           </div>
-        </>
-      ) : taskStatus === 'running' ? (
-        <div class="task-running">
-          <div class="task-spinner" />
-          <span>Running... ({taskSteps} step{taskSteps !== 1 ? 's' : ''})</span>
-        </div>
-      ) : (
-        <div class="task-result">
-          <div class={`task-status ${taskStatus}`}>
-            {taskStatus === 'complete' ? '✓ Complete' : '✗ ' + taskStatus}
-            {taskSteps > 0 && ` · ${taskSteps} steps`}
-          </div>
-          <div class="task-answer">{taskAnswer}</div>
-          <button class="btn-secondary" onClick={() => { setTaskStatus(null); setTaskAnswer(''); }} style={{ marginTop: 8 }}>
-            Run another task
-          </button>
         </div>
       )}
+
+      {/* Step 3: Run task */}
+      {hasKeys && hasConnected && (
+        <div class="card">
+          <div class="step-row">
+            <span class={`step-badge ${testComplete ? 'done' : 'active'}`}>{testComplete ? '✓' : '3'}</span>
+            <div class="step-content">
+              <h3>Run a test task</h3>
+              <p class="step-explain">Tell Hanzi what to do in your connected browser.</p>
+              {!taskStatus ? (
+                <div class="inline-form">
+                  <input value={taskInput} onInput={e => setTaskInput(e.target.value)} placeholder="What should Hanzi do?" onKeyDown={e => e.key === 'Enter' && runTask()} />
+                  <button class="btn-primary" onClick={runTask} disabled={!taskInput.trim()}>Run</button>
+                </div>
+              ) : taskStatus === 'running' ? (
+                <div class="task-running"><div class="task-spinner" /><span>Running... ({taskSteps} step{taskSteps !== 1 ? 's' : ''})</span></div>
+              ) : (
+                <div class="task-result">
+                  <div class={`task-status-label ${taskStatus}`}>{taskStatus === 'complete' ? '✓ Complete' : '✗ ' + taskStatus}{taskSteps > 0 && ` · ${taskSteps} steps`}</div>
+                  <div class="task-answer">{taskAnswer}</div>
+                  <button class="btn-secondary" onClick={() => { setTaskStatus(null); setTaskAnswer(''); }} style={{ marginTop: 8 }}>Run another</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 2: Ship to users — only show after first test task */}
+      {testComplete && <ShipToUsers />}
     </div>
   );
 }
 
-// ─── Build Guide ─────────────────────────────────────
+// ─── Ship to Users ───────────────────────────────────
 
-// ─── Sessions Card ───────────────────────────────────
+function ShipToUsers() {
+  const [link, setLink] = useState(null);
+  const [generating, setGenerating] = useState(false);
 
-function SessionsCard({ sessions, onRefresh }) {
-  const connected = sessions.filter(s => s.status === 'connected').length;
+  const generateLink = async () => {
+    setGenerating(true);
+    const r = await api('POST', '/v1/browser-sessions/pair', { label: 'User pairing link' });
+    setGenerating(false);
+    if (r?.status === 201) setLink(`${location.origin}/pair/${r.data.pairing_token}`);
+  };
+
+  return (
+    <>
+      <div class="section-label" style={{ marginTop: 28 }}>Ship it to your users</div>
+      <p class="section-desc">Your user clicks a link. Their browser pairs automatically.</p>
+
+      <div class="card">
+        <h3>Generate a pairing link</h3>
+        <p class="step-explain">Each user gets their own link. They click it → extension auto-pairs → done.</p>
+        {!link ? (
+          <button class="btn-primary" onClick={generateLink} disabled={generating} style={{ marginTop: 8 }}>
+            {generating ? 'Generating...' : 'Try it — generate a link'}
+          </button>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            <div class="mono-with-copy"><div class="mono" style={{ fontSize: 12 }}>{link}</div><CopyButton text={link} label="Copy link" /></div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <a href={link} target="_blank" rel="noreferrer" class="btn-primary" style={{ display: 'inline-block', textDecoration: 'none', color: 'white', padding: '6px 14px', borderRadius: 8, fontSize: 13 }}>Open it</a>
+              <button class="btn-secondary" onClick={() => setLink(null)} style={{ fontSize: 12 }}>New link</button>
+            </div>
+            <p class="step-explain" style={{ marginTop: 8 }}>Expires in 5 minutes. In production, your backend generates one per user via <code>POST /v1/browser-sessions/pair</code>.</p>
+          </div>
+        )}
+      </div>
+
+      {/* What the user sees */}
+      <div class="card" style={{ background: '#f5f1e8' }}>
+        <h3>What your user sees</h3>
+        <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 20, background: 'white', textAlign: 'center', margin: '8px 0' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Connect your browser</div>
+          <div style={{ padding: '10px 16px', background: '#e8f0ec', color: '#2f4a3d', borderRadius: 8, display: 'inline-block', fontWeight: 500, fontSize: 14 }}>✓ Browser connected!</div>
+          <div style={{ fontSize: 13, color: '#6d6256', marginTop: 8 }}>You can close this tab.</div>
+        </div>
+        <p class="step-explain">If the extension isn't installed, they see an "Install" button linking to the Chrome Web Store.</p>
+      </div>
+    </>
+  );
+}
+
+// ─── Sessions Tab ────────────────────────────────────
+
+function SessionsTab({ sessions, onRefresh, usage }) {
+  const connected = sessions.filter(s => s.status === 'connected');
+  const disconnected = sessions.filter(s => s.status === 'disconnected');
 
   const removeSession = async (id) => {
     await api('DELETE', `/v1/browser-sessions/${id}`);
     onRefresh();
   };
-
   const removeAllDisconnected = async () => {
-    const disconnected = sessions.filter(s => s.status === 'disconnected');
-    for (const s of disconnected) {
-      await api('DELETE', `/v1/browser-sessions/${s.id}`);
-    }
+    for (const s of disconnected) await api('DELETE', `/v1/browser-sessions/${s.id}`);
     onRefresh();
   };
 
+  const fmt = n => n > 999999 ? (n / 1e6).toFixed(1) + 'M' : n > 999 ? (n / 1e3).toFixed(1) + 'K' : String(n || 0);
+
   return (
-    <div class="card">
-      <h2>
-        Sessions
-        <span class="card-badge">{connected > 0 ? `${connected} connected` : `${sessions.length} paired`}</span>
-      </h2>
-      {sessions.map(s => {
-        const meta = [s.label, s.external_user_id].filter(Boolean).join(' · ');
-        return (
-          <div class="session-row" key={s.id}>
-            <span class="session-info">
-              <span class={`status-dot ${s.status}`} />
-              <span>{s.status}</span>
-              {meta && <span class="session-meta">({meta})</span>}
-            </span>
-            <span class="session-id-group">
-              <code>{s.id.slice(0, 8)}...</code>
-              {s.status === 'disconnected' && (
-                <button class="btn-danger" onClick={() => removeSession(s.id)} style={{ padding: '2px 8px', fontSize: 11 }}>Remove</button>
-              )}
-            </span>
-          </div>
-        );
-      })}
-      {sessions.some(s => s.status === 'disconnected') && (
-        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button class="btn-secondary" onClick={removeAllDisconnected} style={{ fontSize: 12 }}>Remove all disconnected</button>
-          <button class="btn-secondary" onClick={onRefresh} style={{ fontSize: 12 }}>Refresh</button>
+    <div>
+      {/* Summary */}
+      <div class="summary-bar">
+        <span class="summary-stat"><strong>{connected.length}</strong> connected</span>
+        <span class="summary-stat"><strong>{disconnected.length}</strong> disconnected</span>
+        <span class="summary-stat"><strong>{usage?.taskCount || 0}</strong> tasks run</span>
+      </div>
+
+      {/* Connected */}
+      {connected.length > 0 && (
+        <div class="card">
+          <h3 style={{ color: 'var(--green)' }}>Connected</h3>
+          {connected.map(s => <SessionRow key={s.id} session={s} />)}
         </div>
       )}
-      {!sessions.some(s => s.status === 'disconnected') && (
-        <button class="btn-secondary" onClick={onRefresh} style={{ marginTop: 8, fontSize: 12 }}>Refresh</button>
+
+      {/* Disconnected */}
+      {disconnected.length > 0 && (
+        <div class="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ color: 'var(--muted)' }}>Disconnected</h3>
+            <button class="btn-secondary" onClick={removeAllDisconnected} style={{ fontSize: 11, padding: '3px 10px' }}>Remove all</button>
+          </div>
+          {disconnected.map(s => <SessionRow key={s.id} session={s} onRemove={() => removeSession(s.id)} />)}
+          <p class="step-explain" style={{ marginTop: 6 }}>Sessions reconnect automatically when the browser reopens.</p>
+        </div>
       )}
+
+      {sessions.length === 0 && (
+        <div class="card"><p class="step-explain">No sessions yet. Go to Getting Started to pair a browser.</p></div>
+      )}
+
+      {/* Usage */}
+      <div class="card">
+        <h3>Usage</h3>
+        <div class="usage-grid">
+          <div class="usage-stat"><div class="num">{usage?.taskCount || 0}</div><div class="label">Tasks</div></div>
+          <div class="usage-stat"><div class="num">{fmt(usage?.totalApiCalls)}</div><div class="label">API calls</div></div>
+          <div class="usage-stat"><div class="num">{fmt((usage?.totalInputTokens || 0) + (usage?.totalOutputTokens || 0))}</div><div class="label">Tokens</div></div>
+        </div>
+      </div>
+
+      <button class="btn-secondary" onClick={onRefresh} style={{ marginTop: 8, fontSize: 12 }}>Refresh</button>
     </div>
   );
 }
 
-// ─── Usage Card ──────────────────────────────────────
-
-function UsageCard({ usage }) {
-  const fmt = n => n > 999999 ? (n / 1e6).toFixed(1) + 'M' : n > 999 ? (n / 1e3).toFixed(1) + 'K' : String(n || 0);
+function SessionRow({ session: s, onRemove }) {
+  const label = s.label || s.external_user_id || 'Unnamed';
   return (
-    <div class="card">
-      <h2>Usage</h2>
-      <div class="usage-grid">
-        <div class="usage-stat"><div class="num">{usage?.taskCount || 0}</div><div class="label">Tasks</div></div>
-        <div class="usage-stat"><div class="num">{fmt(usage?.totalApiCalls)}</div><div class="label">API calls</div></div>
-        <div class="usage-stat"><div class="num">{fmt((usage?.totalInputTokens || 0) + (usage?.totalOutputTokens || 0))}</div><div class="label">Tokens</div></div>
+    <div class="session-row">
+      <span class="session-info">
+        <span class={`status-dot ${s.status}`} />
+        <span class="session-label">{label}</span>
+        {s.external_user_id && s.label && <span class="session-meta">{s.external_user_id}</span>}
+      </span>
+      <span class="session-id-group">
+        <span class="session-time">{timeAgo(s.last_heartbeat)}</span>
+        <code>{s.id.slice(0, 8)}...</code>
+        {onRemove && <button class="btn-danger" onClick={onRemove} style={{ padding: '2px 8px', fontSize: 11 }}>Remove</button>}
+      </span>
+    </div>
+  );
+}
+
+// ─── Settings Tab ────────────────────────────────────
+
+function SettingsTab({ keys, loadKeys, setError, profile }) {
+  const [newKeyName, setNewKeyName] = useState('');
+  const [createdKey, setCreatedKey] = useState(null);
+
+  const createKey = async () => {
+    if (!newKeyName.trim()) return;
+    const r = await api('POST', '/v1/api-keys', { name: newKeyName.trim() });
+    if (r?.status === 201) { setCreatedKey(r.data.key); setNewKeyName(''); await loadKeys(); }
+    else setError(r?.data?.error || 'Failed');
+  };
+  const deleteKey = async (id) => {
+    if (!confirm('Delete this API key?')) return;
+    await api('DELETE', `/v1/api-keys/${id}`);
+    setCreatedKey(null);
+    await loadKeys();
+  };
+
+  return (
+    <div>
+      <div class="card">
+        <h3>API Keys</h3>
+        {keys.map(k => (
+          <div class="key-row" key={k.id}>
+            <span><strong>{k.name}</strong> <code class="key-prefix">{k.key_prefix}</code>{k.last_used_at && <span class="session-meta"> · used {timeAgo(k.last_used_at)}</span>}</span>
+            <button class="btn-danger" onClick={() => deleteKey(k.id)}>Delete</button>
+          </div>
+        ))}
+        {createdKey && (
+          <div class="key-created">
+            <div class="mono-with-copy"><div class="mono">{createdKey}</div><CopyButton text={createdKey} label="Copy key" /></div>
+            <div class="warning">Save this key — it won't be shown again.</div>
+          </div>
+        )}
+        <div class="inline-form" style={{ marginTop: 8 }}>
+          <input value={newKeyName} onInput={e => setNewKeyName(e.target.value)} placeholder="Key name" maxLength={100} onKeyDown={e => e.key === 'Enter' && createKey()} />
+          <button class="btn-primary" onClick={createKey} disabled={!newKeyName.trim()}>Create key</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Workspace</h3>
+        <p class="step-explain">{profile?.workspace?.name || 'Your workspace'}</p>
+        <p class="step-explain">Plan: {profile?.workspace?.plan || 'free'} (early access)</p>
+      </div>
+
+      <div class="card">
+        <h3>Resources</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <a href="/docs.html#build-with-hanzi">API Documentation</a>
+          <a href="https://github.com/hanzili/llm-in-chrome/tree/main/examples/partner-quickstart" target="_blank">Sample App (GitHub)</a>
+          <a href="https://github.com/hanzili/llm-in-chrome/tree/main/sdk" target="_blank">SDK Source</a>
+          <a href="https://discord.gg/hahgu5hcA5" target="_blank">Discord Community</a>
+        </div>
       </div>
     </div>
   );
