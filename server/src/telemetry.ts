@@ -22,8 +22,8 @@ const CONFIG_DIR = join(homedir(), ".hanzi-browse");
 const CONFIG_PATH = join(CONFIG_DIR, "config.json");
 
 // Placeholder DSNs — will be replaced with real values in Task 8
-const SENTRY_DSN = "__SENTRY_DSN_MCP__";
-const POSTHOG_KEY = "__POSTHOG_API_KEY__";
+const SENTRY_DSN = "https://2d5504c5db572b0b2709e64f03bdfcc6@o4511120870932480.ingest.us.sentry.io/4511120907698176";
+const POSTHOG_KEY = "phc_SNXFKD8YOBPvBNWWZnuCe7stDsJJNJ5WS8MujKhajIF";
 const POSTHOG_HOST = "https://us.i.posthog.com";
 
 let posthog: PostHog | null = null;
