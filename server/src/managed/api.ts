@@ -928,6 +928,31 @@ async function handleRequest(
   try {
     // --- Better Auth routes (/api/auth/*) ---
     if (url?.startsWith("/api/auth")) {
+      // GET /api/auth/sign-in/social → redirect to Google OAuth
+      // Better Auth only handles this as POST, but users land here via browser navigation
+      if (method === "GET" && url?.startsWith("/api/auth/sign-in/social")) {
+        const auth = createAuth();
+        if (auth) {
+          const parsedUrl = new URL(url, "https://api.hanzilla.co");
+          const provider = parsedUrl.searchParams.get("provider") || "google";
+          const callbackURL = parsedUrl.searchParams.get("callbackURL") || "/dashboard";
+          try {
+            const response = await auth.api.signInSocial({ body: { provider, callbackURL } });
+            if (response?.url) {
+              res.writeHead(302, { Location: response.url });
+              res.end();
+              return;
+            }
+          } catch (err: any) {
+            log.error("Social sign-in redirect error", { requestId }, { error: err.message });
+          }
+        }
+        // Fallback: redirect to dashboard
+        res.writeHead(302, { Location: "/dashboard" });
+        res.end();
+        return;
+      }
+
       const auth = createAuth();
       if (auth) {
         // Use Better Auth's built-in Node handler for correct OAuth flow
