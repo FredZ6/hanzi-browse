@@ -19,6 +19,7 @@ import {
   checkCredentialFlowResult,
   type DetectOptions,
 } from './detect-credentials.js';
+import { initTelemetry, trackEvent, shutdownTelemetry } from '../telemetry.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -767,6 +768,9 @@ async function installSkills(agents: AgentConfig[], isInteractive: boolean): Pro
 // ── Main ───────────────────────────────────────────────────────────────
 
 export async function runSetup(options: { only?: string; yes?: boolean } = {}): Promise<void> {
+  initTelemetry();
+  trackEvent("setup_started");
+
   const registry = getAgentRegistry();
   const only = options.only;
   const interactive = options.yes ? false : (process.stdin.isTTY ?? false);
@@ -817,7 +821,10 @@ export async function runSetup(options: { only?: string; yes?: boolean } = {}): 
   const detected: AgentConfig[] = [];
   for (const agent of registry) {
     if (only && agent.slug !== only) continue;
-    if (agent.detect()) detected.push(agent);
+    if (agent.detect()) {
+      detected.push(agent);
+      trackEvent("setup_agent_detected", { agent: agent.name });
+    }
   }
 
   sp1.stop(interactive
@@ -852,6 +859,8 @@ export async function runSetup(options: { only?: string; yes?: boolean } = {}): 
     } else {
       log(`  ●  No agents found. Add manually: ${JSON.stringify({ mcpServers: { "hanzi-browser": MCP_ENTRY } })}`);
     }
+    trackEvent("setup_failed", { error_category: "no_agents_detected" });
+    await shutdownTelemetry();
     return;
   }
 
@@ -975,6 +984,9 @@ export async function runSetup(options: { only?: string; yes?: boolean } = {}): 
     if (errors > 0) log(`     ${errors} agent(s) failed — check errors above.`);
     log('');
   }
+
+  trackEvent("setup_completed", { agent: detected.map(a => a.name).join(", ") });
+  await shutdownTelemetry();
 
   rl?.close();
   setTimeout(() => process.exit(0), 200);
