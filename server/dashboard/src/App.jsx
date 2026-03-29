@@ -115,7 +115,7 @@ export function App() {
         <button class={`tab ${tab === 'start' ? 'active' : ''}`} onClick={() => setTab('start')}>Getting Started</button>
         <button class={`tab ${tab === 'sessions' ? 'active' : ''}`} onClick={() => setTab('sessions')}>Sessions{sessions.length > 0 && <span class="tab-count">{sessions.filter(s => s.status === 'connected').length}</span>}</button>
         <button class={`tab ${tab === 'settings' ? 'active' : ''}`} onClick={() => setTab('settings')}>Settings</button>
-        <button class={`tab ${tab === 'automations' ? 'active' : ''}`} onClick={() => setTab('automations')}>Automations</button>
+        {/* Automations tab hidden until ready — infrastructure is built but UI needs work */}
       </div>
 
       {tab === 'start' && (

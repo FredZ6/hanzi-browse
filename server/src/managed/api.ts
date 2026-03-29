@@ -1060,7 +1060,24 @@ async function handleRequest(
       }
     }
 
-    // --- Embeddable pairing snippet ---
+    // --- Embeddable pairing component (Stripe Elements-style) ---
+    if (method === "GET" && url === "/embed.js") {
+      const embedPath = join(process.cwd(), "landing/embed.js");
+      if (existsSync(embedPath)) {
+        res.writeHead(200, {
+          "Content-Type": "application/javascript",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+        });
+        res.end(readFileSync(embedPath));
+      } else {
+        res.writeHead(404);
+        res.end("Not found");
+      }
+      return;
+    }
+
+    // --- Legacy pairing snippet ---
     if (method === "GET" && url === "/hanzi-pair.js") {
       const snippetPath = join(process.cwd(), "sdk/hanzi-pair.js");
       if (existsSync(snippetPath)) {

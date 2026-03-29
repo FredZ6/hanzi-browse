@@ -1641,7 +1641,7 @@ async function startMcpTaskInternal(sessionId, tabId, task) {
   void persistMcpSessions();
 
   try {
-    await showAgentIndicators(tabId);
+    await showAgentIndicators(tabId, { sessionId, taskId: session.currentTaskId });
   } catch (indicatorErr) {
     console.warn(`[MCP] showAgentIndicators failed (non-fatal):`, indicatorErr.message);
   }

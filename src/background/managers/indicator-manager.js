@@ -13,10 +13,10 @@ let indicatorTabId = null;
  * @param {number} tabId - Tab ID to show indicators on
  * @returns {Promise<void>}
  */
-async function showAgentIndicators(tabId) {
+async function showAgentIndicators(tabId, meta) {
   indicatorTabId = tabId;
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'SHOW_AGENT_INDICATORS' });
+    await chrome.tabs.sendMessage(tabId, { type: 'SHOW_AGENT_INDICATORS', taskId: meta?.taskId, sessionId: meta?.sessionId });
   } catch (e) {
     // Tab might not have content script loaded
   }

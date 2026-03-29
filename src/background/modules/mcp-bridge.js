@@ -611,8 +611,15 @@ async function handleMcpCommand(command) {
     case 'task_started':
       chrome.runtime.sendMessage({
         type: 'TASK_UPDATE',
-        update: { status: 'running', message: 'Task started on managed service...' },
+        update: { status: 'running', message: 'Task started on managed service...', taskId: command.taskId },
       }).catch(() => {});
+      // Show agent indicators with task ID on the active tab
+      try {
+        const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (activeTab?.id) {
+          await chrome.tabs.sendMessage(activeTab.id, { type: 'SHOW_AGENT_INDICATORS', taskId: command.taskId });
+        }
+      } catch {}
       break;
 
     case 'task_update':

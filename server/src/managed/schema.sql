@@ -200,3 +200,75 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_workspace ON usage_events(workspace_
 CREATE INDEX IF NOT EXISTS idx_browser_sessions_workspace ON browser_sessions(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_workspace ON api_keys(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON workspace_members(user_id);
+
+-- ─── Scheduled Automations ────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS automations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  browser_session_id UUID REFERENCES browser_sessions(id) ON DELETE SET NULL,
+  type TEXT NOT NULL DEFAULT 'x-marketer',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'error')),
+  config JSONB NOT NULL DEFAULT '{}',
+  -- config: { keywords, product_name, product_url, product_description,
+  --           voice_profile, max_drafts, reply_mix, schedule_cron, timezone,
+  --           notification_email }
+  last_run_at TIMESTAMPTZ,
+  next_run_at TIMESTAMPTZ,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_automations_workspace ON automations(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_automations_next_run ON automations(next_run_at) WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS automation_drafts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  automation_id UUID NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  scout_task_id UUID REFERENCES task_runs(id) ON DELETE SET NULL,
+  batch_id UUID NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'edited', 'skipped', 'posted', 'failed')),
+  -- Tweet data
+  tweet_url TEXT NOT NULL,
+  tweet_text TEXT,
+  tweet_author_handle TEXT,
+  tweet_author_name TEXT,
+  tweet_author_bio TEXT,
+  tweet_author_followers INTEGER,
+  tweet_engagement JSONB,
+  tweet_age_hours NUMERIC,
+  -- Draft reply
+  reply_text TEXT NOT NULL,
+  reply_type TEXT CHECK (reply_type IN ('A', 'B', 'C')),
+  reply_reasoning TEXT,
+  score INTEGER,
+  -- Post results
+  post_task_id UUID REFERENCES task_runs(id) ON DELETE SET NULL,
+  posted_at TIMESTAMPTZ,
+  edited_text TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_drafts_automation ON automation_drafts(automation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_drafts_batch ON automation_drafts(batch_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_pending ON automation_drafts(workspace_id, status) WHERE status = 'pending';
+
+CREATE TABLE IF NOT EXISTS engagement_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id UUID NOT NULL REFERENCES workspaces(id),
+  automation_id UUID REFERENCES automations(id) ON DELETE SET NULL,
+  draft_id UUID REFERENCES automation_drafts(id) ON DELETE SET NULL,
+  author_handle TEXT NOT NULL,
+  reply_type TEXT,
+  keyword TEXT,
+  tweet_url TEXT,
+  tweet_summary TEXT,
+  reply_summary TEXT,
+  posted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_engagement_workspace ON engagement_log(workspace_id, posted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_engagement_handle ON engagement_log(workspace_id, author_handle);
