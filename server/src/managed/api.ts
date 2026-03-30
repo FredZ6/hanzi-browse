@@ -728,7 +728,23 @@ async function handleCreateTask(
     executeTool: async (toolName, toolInput) => {
       const startMs = Date.now();
       const result = await executeToolViaRelay(toolName, toolInput, browser_session_id);
-      // Save screenshot from tool result (best-effort)
+      const durationMs = Date.now() - startMs;
+      // Save tool result content (best-effort) — enables browsing log access via GET /v1/tasks/:id/steps
+      const rawOutput = result.output;
+      const toolOutput = typeof rawOutput === "string" ? rawOutput
+        : rawOutput ? JSON.stringify(rawOutput).slice(0, 50000)
+        : "";
+      if (toolOutput) {
+        S.insertTaskStep({
+          taskRunId: taskRun.id,
+          step: currentStep,
+          status: "tool_output",
+          toolName,
+          output: toolOutput.slice(0, 50000), // cap at 50KB per step
+          durationMs,
+        }).catch(() => {});
+      }
+      // Save screenshot from tool result
       if (result.screenshot?.data) {
         S.insertTaskStep({
           taskRunId: taskRun.id,
@@ -736,7 +752,7 @@ async function handleCreateTask(
           status: "screenshot",
           toolName,
           screenshot: result.screenshot.data,
-          durationMs: Date.now() - startMs,
+          durationMs,
         }).catch(() => {});
       }
       return result;
@@ -817,6 +833,15 @@ async function handleCreateTask(
         }
       }
       if (updated) {
+        // Send task_complete to extension so overlay hides
+        if (relayConnection) {
+          relayConnection.send({
+            type: "task_complete",
+            targetSessionId: browser_session_id,
+            taskId: taskRun.id,
+            answer: result.answer,
+          } as any);
+        }
         trackManagedEvent("task_completed", apiKey.workspaceId, {
           steps: result.steps,
           duration_ms: Date.now() - taskStartedAt,
@@ -1686,7 +1711,16 @@ export async function runInternalTask(params: {
       task,
       url,
       executeTool: async (toolName: string, toolInput: Record<string, any>) => {
-        return executeToolViaRelay(toolName, toolInput, browserSessionId);
+        const result = await executeToolViaRelay(toolName, toolInput, browserSessionId);
+        // Save tool output for browsing log
+        const rawOutput = result.output;
+        const toolOutput = typeof rawOutput === "string" ? rawOutput
+          : rawOutput ? JSON.stringify(rawOutput).slice(0, 50000)
+          : "";
+        if (toolOutput) {
+          S.insertTaskStep({ taskRunId: taskRun.id, step: currentStep, status: "tool_output", toolName, output: toolOutput.slice(0, 50000) }).catch(() => {});
+        }
+        return result;
       },
       onStep: (step) => {
         currentStep = step.step;

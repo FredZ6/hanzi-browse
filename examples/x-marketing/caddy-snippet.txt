@@ -1,0 +1,17 @@
+# Add this to /etc/caddy/Caddyfile on the VPS
+# After the existing api.hanzilla.co and relay.hanzilla.co blocks
+
+browse.hanzilla.co {
+    # Existing browse.hanzilla.co config here...
+
+    # X Marketing tool
+    handle_path /tools/x-marketing* {
+        reverse_proxy localhost:3002
+    }
+}
+
+# --- OR if x-marketing gets its own subdomain ---
+
+# xmarketing.hanzilla.co {
+#     reverse_proxy localhost:3002
+# }

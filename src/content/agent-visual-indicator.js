@@ -390,10 +390,14 @@
       case 'SHOW_AGENT_INDICATORS':
         currentTaskId = message.taskId || message.sessionId || null;
         showGlowIndicator();
+        // Auto-hide after 5 minutes if no HIDE message received (safety net)
+        if (window._hanziAutoHideTimer) clearTimeout(window._hanziAutoHideTimer);
+        window._hanziAutoHideTimer = setTimeout(() => { hideGlowIndicator(); }, 5 * 60 * 1000);
         sendResponse({ success: true });
         break;
 
       case 'HIDE_AGENT_INDICATORS':
+        if (window._hanziAutoHideTimer) { clearTimeout(window._hanziAutoHideTimer); window._hanziAutoHideTimer = null; }
         hideGlowIndicator();
         sendResponse({ success: true });
         break;

@@ -88,9 +88,17 @@ npx hanzi-browse setup
 
 <br/>
 
-## Skills
+## Skills & Free Tools
 
-The setup wizard installs browser skills into your agent automatically. Skills teach your agent *when* and *how* to use the browser for specific workflows:
+Hanzi Browse has two distribution channels. Both use the same browser automation engine and site domain knowledge:
+
+**Skills** — for users who run Hanzi locally through their AI agent. The setup wizard installs skills directly into your agent (Claude Code, Cursor, etc.). Each skill teaches the agent *when* and *how* to use the browser for a specific workflow.
+
+**Free Tools** — hosted web apps that anyone can try without installing anything. Each tool is a standalone app built on the Hanzi API that demonstrates a use case. Every skill can become a free tool.
+
+### Skills
+
+Installed automatically during `npx hanzi-browse setup`. Your agent reads these as markdown files.
 
 | Skill | Description |
 |-------|-------------|
@@ -102,6 +110,20 @@ The setup wizard installs browser skills into your agent automatically. Skills t
 | `x-marketer` | Twitter/X marketing workflows |
 
 Open source — [add your own](https://github.com/hanzili/hanzi-browse/tree/main/server/skills).
+
+### Free Tools
+
+Try them at [tools.hanzilla.co](https://tools.hanzilla.co). No account needed — just install the extension and go.
+
+| Tool | What it does | Try it |
+|------|-------------|--------|
+| X Marketing | AI finds relevant conversations on X, drafts personalized replies, posts from your Chrome | [tools.hanzilla.co/x-marketing](https://tools.hanzilla.co/x-marketing) |
+
+### Site Domain Knowledge
+
+Both skills and free tools rely on **site patterns** — verified interaction playbooks for complex websites. These document how to handle async loading, Draft.js editors, anti-bot detection, and other site-specific quirks.
+
+Currently available: [x.com](server/site-patterns/x.com.md). Contribute patterns for other sites.
 
 <br/>
 

@@ -1,26 +1,52 @@
 /**
- * X Marketing — Hanzi Browse Example
+ * X Marketing — Free Tool by Hanzi Browse
  *
- * Two-layer architecture:
- *   1. Strategy AI (LLM) — analyzes product, scores tweets, drafts replies
- *   2. Browser tool (Hanzi) — searches X, posts replies
+ * Public-facing free tool at browse.hanzilla.co/tools/x-marketing
+ *
+ * Architecture:
+ *   - Server is STATELESS — all draft/product state lives in the client (localStorage)
+ *   - Server provides: LLM calls, Hanzi API proxy, rate limiting, email capture
+ *   - Two AI layers: Strategy AI (Claude) analyzes/drafts, Browser AI (Hanzi) searches/posts
  *
  * Setup:
- *   HANZI_API_KEY=hic_live_...  (browser automation)
+ *   HANZI_API_KEY=hic_live_...  (browser automation — provided by us, many credits)
  *   ANTHROPIC_API_KEY=sk-...    (strategy AI — or set LLM_BASE_URL for proxy)
  *   npm start
  */
 
 import express from "express";
+import { readFileSync, existsSync, appendFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
-// Disable proxy for all outbound fetch — we reach api.hanzilla.co directly
+// Disable proxy for all outbound fetch
 delete process.env.http_proxy;
 delete process.env.https_proxy;
 delete process.env.HTTP_PROXY;
 delete process.env.HTTPS_PROXY;
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+
+// ── Analytics (PostHog) & Error Tracking (Sentry) ────────────
+
+const POSTHOG_KEY = process.env.POSTHOG_API_KEY || "phc_SNXFKD8YOBPvBNWWZnuCe7stDsJJNJ5WS8MujKhajIF";
+const SENTRY_DSN = process.env.SENTRY_DSN || "";
+
+function track(event, properties = {}, ip) {
+  if (!POSTHOG_KEY) return;
+  fetch("https://us.i.posthog.com/capture/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: POSTHOG_KEY,
+      event,
+      distinct_id: ip || "server",
+      properties: { tool: "x-marketing", ...properties },
+    }),
+  }).catch(() => {});
+}
 
 const HANZI_KEY = process.env.HANZI_API_KEY;
 const HANZI_URL = process.env.HANZI_API_URL || "https://api.hanzilla.co";
@@ -31,10 +57,41 @@ const PORT = process.env.PORT || 3001;
 
 if (!HANZI_KEY) { console.error("Set HANZI_API_KEY"); process.exit(1); }
 
-// In-memory store
-let productContext = null;
-const drafts = [];
-const posted = [];
+// Load X.com site patterns for browser tasks
+const xPatternPath = join(__dirname, "../../server/site-patterns/x.com.md");
+const X_SITE_PATTERN = existsSync(xPatternPath) ? readFileSync(xPatternPath, "utf-8") : "";
+const HTML = readFileSync(join(__dirname, "index.html"), "utf-8");
+
+// ── Rate Limiting (per IP, resets daily) ─────────────────────
+
+const rateLimits = new Map();
+const LIMITS = { analyze: 10, search: 15, post: 15, email: 3, extract: 5 };
+
+function checkRate(req, res, action) {
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const now = Date.now();
+  let entry = rateLimits.get(ip);
+  if (!entry || now - entry.reset > 86400000) {
+    entry = { analyze: 0, search: 0, post: 0, email: 0, reset: now };
+    rateLimits.set(ip, entry);
+  }
+  if (entry[action] >= LIMITS[action]) {
+    res.status(429).json({
+      error: `Daily limit reached (${LIMITS[action]} ${action} requests/day). Come back tomorrow or get your own API key at browse.hanzilla.co.`,
+    });
+    return false;
+  }
+  entry[action]++;
+  return true;
+}
+
+// Cleanup stale entries hourly
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, e] of rateLimits) {
+    if (now - e.reset > 86400000) rateLimits.delete(ip);
+  }
+}, 3600000);
 
 // ── Hanzi API (browser tool) ─────────────────────────────────
 
@@ -89,14 +146,36 @@ function extractJSON(text) {
   return null;
 }
 
-// ── Routes ───────────────────────────────────────────────────
+// ── Static & Proxy Routes ────────────────────────────────────
 
-// Sessions
+app.get("/embed.js", (req, res) => {
+  res.setHeader("Content-Type", "application/javascript");
+  // Try local copy first (production), fall back to repo path (development)
+  const localPath = join(__dirname, "embed.js");
+  const repoPath = join(__dirname, "../../landing/embed.js");
+  res.end(readFileSync(existsSync(localPath) ? localPath : repoPath, "utf-8"));
+});
+
+app.get("/", (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.end(HTML);
+});
+
+// Proxy for embed.js widget (avoids CORS)
+app.get("/v1/browser-sessions", async (req, res) => {
+  try { res.json(await hanzi("GET", "/v1/browser-sessions")); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post("/v1/browser-sessions/pair", async (req, res) => {
+  try {
+    const data = await hanzi("POST", "/v1/browser-sessions/pair", { label: "X Marketing" });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.get("/api/sessions", async (req, res) => {
   try { res.json(await hanzi("GET", "/v1/browser-sessions")); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post("/api/pair", async (req, res) => {
   try {
     const data = await hanzi("POST", "/v1/browser-sessions/pair", { label: "X Marketing" });
@@ -104,16 +183,181 @@ app.post("/api/pair", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Reset everything
-app.post("/api/reset", (req, res) => {
-  productContext = null;
-  drafts.length = 0;
-  posted.length = 0;
+// ── Email Capture ────────────────────────────────────────────
+
+const LEADS_FILE = join(__dirname, "leads.jsonl");
+
+app.post("/api/capture-email", (req, res) => {
+  if (!checkRate(req, res, "email")) return;
+  const { email, product_name } = req.body;
+  if (!email || !email.includes("@")) return res.status(400).json({ error: "Valid email required" });
+
+  const entry = { email, product_name, ip: req.ip, ts: new Date().toISOString() };
+  try { appendFileSync(LEADS_FILE, JSON.stringify(entry) + "\n"); } catch {}
+  console.log(`[Lead] ${email} — ${product_name || "unknown"}`);
   res.json({ ok: true });
 });
 
-// Read a URL using Hanzi browser → returns page content
+// ── Cancel Search ────────────────────────────────────────────
+
+const activeSearchTasks = new Map(); // browser_session_id → [taskIds]
+
+app.post("/api/cancel-search", async (req, res) => {
+  const { browser_session_id } = req.body;
+  const taskIds = activeSearchTasks.get(browser_session_id) || [];
+  const cancelled = [];
+  for (const taskId of taskIds) {
+    try { await hanzi("POST", `/v1/tasks/${taskId}/cancel`); cancelled.push(taskId); } catch {}
+  }
+  activeSearchTasks.delete(browser_session_id);
+  console.log(`[Browser] Cancelled ${cancelled.length} tasks`);
+  res.json({ cancelled });
+});
+
+// ── Search One Keyword (returns raw answer) ──────────────────
+
+app.post("/api/search-one", async (req, res) => {
+  if (!checkRate(req, res, "search")) return;
+  try {
+    const { browser_session_id, keyword } = req.body;
+    if (!browser_session_id || !keyword) return res.status(400).json({ error: "browser_session_id and keyword required" });
+
+    console.log(`[Browser] Searching keyword: "${keyword}"`);
+    const task = await hanzi("POST", "/v1/tasks", {
+      browser_session_id,
+      task: `${X_SITE_PATTERN ? "<site_pattern>\n" + X_SITE_PATTERN + "\n</site_pattern>\n\n" : ""}Open a new tab. Go to https://x.com/search?q=${encodeURIComponent(keyword)}&src=typed_query&f=live
+
+IMPORTANT RULES:
+- After navigating, wait 5 seconds. X loads tweets asynchronously.
+- Use get_page_text (NOT read_page) to read tweet content. read_page often returns only "keyboard shortcuts" on X.
+- If you see no tweets, DO NOT navigate to the same URL again. Just wait 3 more seconds and use get_page_text again.
+- NEVER re-navigate to a URL you are already on.
+- Maximum 15 steps. Report what you have by step 12.
+
+Steps:
+1. Navigate to the search URL above
+2. Wait 5 seconds
+3. Use get_page_text to read the page
+4. Scroll down once: {"action": "scroll", "coordinate": [500, 400], "scroll_amount": 3, "scroll_direction": "down"}
+5. Wait 2 seconds, then use get_page_text again
+6. Write your summary
+
+For each tweet you find, include:
+- The FULL tweet URL (contains /status/ — this is CRITICAL)
+- The author's @handle and display name
+- The full tweet text
+- Approximate engagement counts (likes, replies, retweets)
+
+List ALL tweets as a numbered list.`,
+    });
+
+    activeSearchTasks.set(browser_session_id, [...(activeSearchTasks.get(browser_session_id) || []), task.id]);
+    console.log(`[Browser] Keyword "${keyword}" → task ${task.id}`);
+    const result = await pollTask(task.id, 10 * 60 * 1000);
+    console.log(`[Browser] Keyword "${keyword}" → ${result.status} (${result.steps} steps)`);
+    track("search_keyword", { keyword, status: result.status, steps: result.steps }, req.ip);
+    res.json({ keyword, answer: result.answer, status: result.status, steps: result.steps });
+  } catch (err) {
+    console.log(`[Browser] Keyword search error: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Extract Tweets from Summaries ────────────────────────────
+
+app.post("/api/extract", async (req, res) => {
+  if (!checkRate(req, res, "extract")) return;
+  try {
+    const { summaries } = req.body;
+    if (!summaries) return res.status(400).json({ error: "summaries required" });
+
+    const urlCount = (summaries.match(/x\.com\/\w+\/status\/\d+/g) || []).length;
+    console.log(`[Strategy] Extracting tweets from summaries (${summaries.length} chars, ${urlCount} URLs found in text)...`);
+
+    const extraction = await llm(
+      "You extract structured tweet data from text. Return valid JSON only.",
+      `Extract each unique tweet from these X/Twitter search summaries into JSON. Deduplicate by URL.
+
+For each tweet include: url, text, author_handle, author_name, engagement (likes/replies/retweets as numbers).
+Only include tweets with a full URL containing /status/.
+
+SUMMARIES:
+${summaries}
+
+\`\`\`json
+{"tweets": [{"url": "https://x.com/user/status/123", "text": "...", "author_handle": "@user", "author_name": "Name", "engagement": {"likes": 0}}]}
+\`\`\``
+    );
+
+    const parsed = extractJSON(extraction);
+    const tweets = parsed?.tweets || [];
+
+    if (tweets.length === 0 && urlCount > 0) {
+      console.error(`[Strategy] EXTRACTION FAILED: ${urlCount} URLs in summaries but LLM returned 0 tweets`);
+      console.error(`[Strategy] LLM response (first 500 chars): ${extraction.substring(0, 500)}`);
+    }
+
+    console.log(`[Strategy] Extracted ${tweets.length} unique tweets`);
+    res.json({ tweets });
+  } catch (err) {
+    console.error("[Strategy] Extract error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Step 1: Analyze Product (stateless) ──────────────────────
+
+app.post("/api/analyze", async (req, res) => {
+  if (!checkRate(req, res, "analyze")) return;
+  try {
+    const { name, url, description, page_content } = req.body;
+    console.log(`[Strategy] Analyzing product: ${name}${page_content ? " (with page content)" : ""}`);
+
+    const contextBlock = page_content
+      ? `\n\nHere is the actual content from their website:\n<page_content>\n${page_content}\n</page_content>`
+      : "";
+
+    const result = await llm(
+      `You are an expert X/Twitter marketing strategist. Analyze a product and create a marketing strategy for finding and engaging with relevant conversations on X.`,
+      `Analyze this product and create an X marketing strategy:
+
+Product: ${name}
+URL: ${url || "N/A"}
+Description: ${description || "N/A"}${contextBlock}
+
+Return a JSON object with:
+- "keywords": array of 5-8 search keywords/phrases to find relevant tweets (mix of direct terms, pain points, and adjacent topics)
+- "audience": one-sentence description of who we're targeting
+- "voice": object with "tone" (casual/professional/technical), "style" (short description of how replies should sound), "never_use" (array of words/phrases to avoid)
+- "product_pitch": one-sentence description to use when mentioning the product
+- "pain_points": array of 3-5 specific problems the product solves
+
+${page_content ? "Use the actual page content to deeply understand the product. Be specific — reference real features and benefits from the page." : ""}
+
+Return ONLY the JSON, no other text.
+
+\`\`\`json
+{...}
+\`\`\``
+    );
+
+    const strategy = extractJSON(result);
+    if (!strategy) throw new Error("Failed to parse strategy");
+
+    const product = { name, url, description, ...strategy };
+    console.log(`[Strategy] Generated ${strategy.keywords?.length || 0} keywords`);
+    track("tool_analyze", { product_name: name, keywords: strategy.keywords?.length }, req.ip);
+    res.json(product);
+  } catch (err) {
+    console.error("[Strategy] Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Step 1b: Read URL (uses browser) ─────────────────────────
+
 app.post("/api/read-url", async (req, res) => {
+  if (!checkRate(req, res, "analyze")) return;
   try {
     const { browser_session_id, url } = req.body;
     if (!browser_session_id || !url) return res.status(400).json({ error: "browser_session_id and url required" });
@@ -134,11 +378,10 @@ Read the page and extract:
 Return a structured summary. Be thorough — read the full page, scroll down.`,
     });
 
-    const result = await pollTask(task.id, 3 * 60 * 1000);
+    const result = await pollTask(task.id, 10 * 60 * 1000);
     if (result.status !== "complete") {
       return res.status(500).json({ error: `Failed to read URL: ${result.status}` });
     }
-
     console.log(`[Browser] Page read complete`);
     res.json({ content: result.answer });
   } catch (err) {
@@ -147,173 +390,48 @@ Return a structured summary. Be thorough — read the full page, scroll down.`,
   }
 });
 
-// Step 1: Analyze product → Strategy AI generates keywords, audience, voice
-app.post("/api/analyze", async (req, res) => {
-  try {
-    const { name, url, description, page_content } = req.body;
-    console.log(`[Strategy] Analyzing product: ${name}${page_content ? ' (with page content)' : ''}`);
+// ── Step 3: Draft Replies (stateless — client sends product) ─
 
-    const contextBlock = page_content
-      ? `\n\nHere is the actual content from their website:\n<page_content>\n${page_content}\n</page_content>`
-      : '';
-
-    const result = await llm(
-      `You are an expert X/Twitter marketing strategist. Analyze a product and create a marketing strategy for finding and engaging with relevant conversations on X.`,
-      `Analyze this product and create an X marketing strategy:
-
-Product: ${name}
-URL: ${url || "N/A"}
-Description: ${description || "N/A"}${contextBlock}
-
-Return a JSON object with:
-- "keywords": array of 5-8 search keywords/phrases to find relevant tweets (mix of direct terms, pain points, and adjacent topics)
-- "audience": one-sentence description of who we're targeting
-- "voice": object with "tone" (casual/professional/technical), "style" (short description of how replies should sound), "never_use" (array of words/phrases to avoid)
-- "product_pitch": one-sentence description to use when mentioning the product
-- "pain_points": array of 3-5 specific problems the product solves
-
-${page_content ? 'Use the actual page content to deeply understand the product. Be specific — reference real features and benefits from the page.' : ''}
-
-Return ONLY the JSON, no other text.
-
-\`\`\`json
-{...}
-\`\`\``
-    );
-
-    const strategy = extractJSON(result);
-    if (!strategy) throw new Error("Failed to parse strategy");
-
-    productContext = { name, url, description, ...strategy };
-    console.log(`[Strategy] Generated ${strategy.keywords?.length || 0} keywords`);
-    res.json(productContext);
-  } catch (err) {
-    console.error("[Strategy] Error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/product", (req, res) => {
-  res.json(productContext || null);
-});
-
-// Step 2: Search X → Browser tool collects raw tweets
-app.post("/api/search", async (req, res) => {
-  try {
-    const { browser_session_id, keywords } = req.body;
-    if (!keywords?.length) return res.status(400).json({ error: "keywords required" });
-
-    // One task per keyword, run in parallel. Each task is simple (~10 steps).
-    const topKeywords = keywords.slice(0, 3);
-    console.log(`[Browser] Searching X for ${topKeywords.length} keywords in parallel: ${topKeywords.join(", ")}`);
-
-    // Launch all search tasks in parallel
-    const taskPromises = topKeywords.map(async (keyword) => {
-      try {
-        const task = await hanzi("POST", "/v1/tasks", {
-          browser_session_id,
-          task: `Open a new tab. Go to https://x.com/search?q=${encodeURIComponent(keyword)}&src=typed_query&f=live
-
-Wait for results to load. Read the page. Scroll down once. Read the page again.
-
-Then write a DETAILED summary of every tweet you see. For each tweet:
-- The author's @handle and display name
-- The full tweet text (copy it exactly)
-- Approximate like/reply/retweet counts
-
-List ALL tweets as a numbered list. Be thorough.`,
-        });
-        console.log(`[Browser] Keyword "${keyword}" → task ${task.id}`);
-        const result = await pollTask(task.id);
-        console.log(`[Browser] Keyword "${keyword}" → ${result.status} (${result.steps} steps)`);
-        return { keyword, answer: result.answer, status: result.status, task_id: task.id };
-      } catch (err) {
-        console.log(`[Browser] Keyword "${keyword}" → error: ${err.message}`);
-        return { keyword, answer: null, status: "error", task_id: null };
-      }
-    });
-
-    const results = await Promise.all(taskPromises);
-
-    // Combine all summaries
-    const allSummaries = results
-      .filter(r => r.status === "complete" && r.answer && r.answer.length > 50)
-      .map(r => `--- Results for "${r.keyword}" ---\n${r.answer}`)
-      .join("\n\n");
-
-    const taskIds = results.map(r => r.task_id).filter(Boolean);
-
-    if (!allSummaries) {
-      return res.status(500).json({ error: "No tweets found across any keyword", task_ids: taskIds });
-    }
-
-    // Strategy AI (Claude) extracts structured tweet data from all summaries
-    console.log(`[Strategy] Extracting tweets from ${results.filter(r => r.answer).length} keyword summaries...`);
-    const extraction = await llm(
-      "You extract structured tweet data from text summaries of X/Twitter search results. Be precise and deduplicate.",
-      `Here are summaries of tweets found on X/Twitter across multiple keyword searches. Extract each unique tweet into structured JSON. Deduplicate if the same tweet appears in multiple searches.
-
-For each tweet, extract:
-- url (if mentioned, otherwise construct from @handle like https://x.com/handle)
-- text (the tweet content)
-- author_handle (@handle)
-- author_name (display name)
-- engagement (likes, replies, retweets as numbers)
-
-SUMMARIES:
-${allSummaries}
-
-Return ONLY a JSON object:
-\`\`\`json
-{"tweets": [{"url": "...", "text": "...", "author_handle": "@...", "author_name": "...", "engagement": {"likes": 0}}]}
-\`\`\``
-    );
-
-    const parsed = extractJSON(extraction);
-    const tweets = parsed?.tweets || [];
-    console.log(`[Strategy] Extracted ${tweets.length} unique tweets`);
-    res.json({ tweets, task_ids: taskIds });
-  } catch (err) {
-    console.error("[Browser] Search error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Step 3: Score & draft → Strategy AI processes raw tweets
 app.post("/api/draft", async (req, res) => {
+  if (!checkRate(req, res, "analyze")) return;
   try {
-    const { tweets } = req.body;
+    const { tweets, product } = req.body;
     if (!tweets?.length) return res.status(400).json({ error: "tweets required" });
-    if (!productContext) return res.status(400).json({ error: "Run /api/analyze first" });
+    if (!product) return res.status(400).json({ error: "product context required" });
 
     console.log(`[Strategy] Scoring ${tweets.length} tweets and drafting replies...`);
 
-    const skipHandles = posted.map(p => p.author_handle).join(", ") || "none";
-
     const result = await llm(
-      `You are an expert X/Twitter marketer. You score tweet opportunities and draft replies that sound completely human — never AI-generated.
+      `You draft X/Twitter replies that sound like a real person typed them on their phone. You are NOT an AI assistant — you are a developer who happens to know about this product.
 
-Voice profile:
-- Tone: ${productContext.voice?.tone || "casual"}
-- Style: ${productContext.voice?.style || "helpful, concise"}
-- Never use: ${(productContext.voice?.never_use || []).join(", ") || "em dashes, leverage, harness, streamline"}
+Voice:
+- Tone: ${product.voice?.tone || "casual"}
+- Style: ${product.voice?.style || "helpful, concise"}
 
-Anti-AI rules (CRITICAL):
-- No em dashes (—), semicolons, or parallel structure
-- No "Hey!", "Great point!", "Love this!", "Check out"
-- Under 280 characters
-- Use contractions (don't, can't, it's)
-- Sound like a text message, not a press release
+HARD RULES — violating ANY of these means the reply is rejected:
+- NEVER use em dashes (\u2014). Use "..." or "-" instead.
+- NEVER use semicolons. Use periods or commas.
+- NEVER start with "Hey!", "Great point!", "Love this!", "This is", "I'd recommend"
+- NEVER use: leverage, harness, streamline, game-changer, unlock, elevate, seamless
+- NEVER use perfect parallel structure (lists of 3 with matching grammar)
+- NEVER write more than 2 sentences
+- Under 200 characters is ideal, 280 max
+- Use lowercase when it feels natural
+- Use contractions always (don't, can't, it's, that's)
+- Sentence fragments are good. Like this.
+- Start with "honestly", "tbh", "yeah", "oh", "wait" sometimes
+- Sound like a text to a friend who codes, not a LinkedIn post
+- ${(product.voice?.never_use || []).join(", ")}
 - Match the energy of the original poster`,
 
-      `Product: ${productContext.name}
-URL: ${productContext.url || ""}
-Pitch: ${productContext.product_pitch || productContext.description}
-Pain points: ${(productContext.pain_points || []).join("; ")}
+      `Product: ${product.name}
+URL: ${product.url || ""}
+Pitch: ${product.product_pitch || product.description}
+Pain points: ${(product.pain_points || []).join("; ")}
 
-Skip these handles (already engaged): ${skipHandles}
+Here are raw tweets collected from X. Score each 1-10, pick the top 5 REAL tweets, and draft a reply for each.
 
-Here are raw tweets collected from X. Score each 1-10, pick the top 5, and draft a reply for each.
+IMPORTANT: Skip bot accounts, spam posts, and low-quality tweets. Do NOT include them in the output at all — just silently drop them. Only return drafts for tweets worth replying to.
 
 Scoring criteria:
 - Relevance to our product's problem space
@@ -322,10 +440,12 @@ Scoring criteria:
 - Reply visibility (few existing replies = your reply gets seen)
 - Conversation potential (questions > statements)
 
-Reply type mix:
-- Type A (~40%): Pure value, no product mention. Build reputation.
-- Type B (~40%): Value + soft product mention at the end.
-- Type C (~20%): Direct recommendation (only when they're explicitly asking for a tool).
+Reply type mix — YOU MUST follow this distribution:
+- Type A (2 out of 5): Pure value, no product mention. Build reputation.
+- Type B (2 out of 5): Start with value, then NATURALLY mention "${product.name}" and its URL (${product.url || ""}). Example: "honestly the auth session part is what kills most setups. we built ${product.name} for exactly this — ${product.url || ""}"
+- Type C (1 out of 5): Direct recommendation when they're asking for a tool. Example: "${product.name} does this — ${product.url || ""}"
+
+AT LEAST 2 out of 5 replies MUST mention ${product.name} by name and include the URL. This is non-negotiable — the whole point is marketing.
 
 Raw tweets:
 ${JSON.stringify(tweets, null, 2)}
@@ -350,94 +470,84 @@ Return JSON:
     );
 
     const parsed = extractJSON(result);
-    const newDrafts = (parsed?.drafts || []).map((d, i) => ({
+    const drafts = (parsed?.drafts || []).map((d, i) => ({
       id: `d-${Date.now()}-${i}`,
       status: "pending",
       ...d,
     }));
 
-    drafts.push(...newDrafts);
-    console.log(`[Strategy] Drafted ${newDrafts.length} replies`);
-    res.json({ drafts: newDrafts });
+    console.log(`[Strategy] Drafted ${drafts.length} replies`);
+    track("drafts_created", { count: drafts.length, product_name: product.name }, req.ip);
+    res.json({ drafts });
   } catch (err) {
     console.error("[Strategy] Draft error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Drafts CRUD
-app.get("/api/drafts", (req, res) => {
-  const status = req.query.status;
-  res.json(status ? drafts.filter(d => d.status === status) : drafts);
-});
+// ── Step 4: Post Reply (stateless — client sends everything) ─
 
-app.patch("/api/drafts/:id", (req, res) => {
-  const d = drafts.find(x => x.id === req.params.id);
-  if (!d) return res.status(404).json({ error: "Not found" });
-  if (req.body.status) d.status = req.body.status;
-  if (req.body.reply_text) d.reply_text = req.body.reply_text;
-  res.json(d);
-});
-
-// Step 4: Post → Browser tool posts one reply
-app.post("/api/drafts/:id/post", async (req, res) => {
+app.post("/api/post", async (req, res) => {
+  if (!checkRate(req, res, "post")) return;
   try {
-    const { browser_session_id } = req.body;
-    const d = drafts.find(x => x.id === req.params.id);
-    if (!d) return res.status(404).json({ error: "Not found" });
+    const { browser_session_id, tweet_url, reply_text } = req.body;
+    if (!browser_session_id || !tweet_url || !reply_text) {
+      return res.status(400).json({ error: "browser_session_id, tweet_url, and reply_text required" });
+    }
+    if (!tweet_url.includes("/status/")) {
+      return res.status(400).json({ error: `Invalid tweet URL: ${tweet_url}` });
+    }
 
-    console.log(`[Browser] Posting reply to ${d.author_handle}...`);
+    console.log(`[Browser] Posting reply to ${tweet_url}...`);
 
     const task = await hanzi("POST", "/v1/tasks", {
       browser_session_id,
-      task: `Open a new tab, then go to ${d.tweet_url}
+      task: `Open a new tab and navigate to this tweet: ${tweet_url}
 
-Click the reply button. Type this exact text in the reply box:
+YOUR ONLY JOB: Insert the reply text and click Reply. Nothing else. Do NOT navigate away.
 
-${d.reply_text}
+Steps:
+1. Wait 3 seconds for the page to load
+2. Read the page
+3. Click the reply/comment icon (speech bubble) on the tweet
+4. A reply text area will appear — either inline or in a compose modal. BOTH ARE FINE.
+5. Use javascript_tool to insert text:
 
-Click the post/reply button to submit. Confirm it was posted.`,
+document.querySelector('[data-testid="tweetTextarea_0"]').focus();
+document.execCommand('insertText', false, ${JSON.stringify(reply_text)});
+
+6. Read the page to confirm text appeared in the box
+7. Click the blue "Reply" button (it appears next to the text area)
+8. Done. Do NOT navigate anywhere after clicking Reply.
+
+RULES:
+- Use javascript_tool for text input — NEVER use computer type or form_input
+- If you end up at x.com/compose/post — that is FINE, just type and click Reply there
+- If you see "Leave site?" dialog — click CANCEL and stay on the page
+- Do NOT press Escape, do NOT navigate back, do NOT close any modals
+- Do NOT scroll down looking for anything — the reply area is where you opened it
+- Maximum 12 tool calls for this task. If you haven't posted by step 12, stop.`,
     });
 
     const result = await pollTask(task.id, 2 * 60 * 1000);
-
-    if (result.status === "complete") {
-      d.status = "posted";
-      posted.push({ ...d, posted_at: new Date().toISOString() });
-      console.log(`[Browser] Posted reply to ${d.author_handle}`);
-    } else {
-      d.status = "failed";
-      console.log(`[Browser] Failed to post: ${result.status}`);
-    }
-    res.json({ draft: d, result: result.status });
+    console.log(`[Browser] Post result: ${result.status}`);
+    track("reply_posted", { status: result.status, tweet_url }, req.ip);
+    res.json({ result: result.status });
   } catch (err) {
     console.error("[Browser] Post error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.get("/api/posted", (req, res) => res.json(posted));
-
-// ── Frontend ──────────────────────────────────────────────────
-
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const HTML = readFileSync(join(__dirname, "index.html"), "utf-8");
-
-app.get("/", (req, res) => {
-  res.setHeader("Content-Type", "text/html");
-  res.end(HTML);
-});
-
+// ── Serve ────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
   console.log(`
-  X Marketing
+  X Marketing — Free Tool by Hanzi Browse
   http://localhost:${PORT}
 
   Strategy AI: ${LLM_URL} (${LLM_MODEL})
   Browser:     ${HANZI_URL}
+  Rate limits: ${JSON.stringify(LIMITS)}
   `);
 });

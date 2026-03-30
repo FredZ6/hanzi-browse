@@ -191,7 +191,7 @@
     constructor(container, options) {
       this.container = typeof container === 'string' ? document.querySelector(container) : container;
       this.apiKey = options.apiKey;
-      this.apiUrl = options.apiUrl || API_URL;
+      this.apiUrl = options.apiUrl !== undefined ? options.apiUrl : API_URL;
       this.purpose = options.purpose || 'automate browser tasks on your behalf';
       this.onConnected = options.onConnected || (() => {});
       this.onDisconnected = options.onDisconnected || (() => {});
@@ -231,8 +231,28 @@
       this.state = 'checking';
       this.render();
 
-      // Try postMessage ping
-      const extensionReady = await new Promise(resolve => {
+      const found = await this.pingExtension();
+      if (found) {
+        await this.checkSessions();
+      } else {
+        this.state = 'install';
+        this.render();
+        // Auto-detect: poll every 3s for extension install (up to 5 min)
+        this.installPoll = setInterval(async () => {
+          if (await this.pingExtension()) {
+            clearInterval(this.installPoll);
+            this.installPoll = null;
+            await this.checkSessions();
+          }
+        }, 3000);
+        setTimeout(() => {
+          if (this.installPoll) { clearInterval(this.installPoll); this.installPoll = null; }
+        }, 300000);
+      }
+    }
+
+    async pingExtension() {
+      return new Promise(resolve => {
         const handler = (e) => {
           if (e.data?.type === 'HANZI_EXTENSION_READY') {
             window.removeEventListener('message', handler);
@@ -246,14 +266,6 @@
           resolve(false);
         }, 1500);
       });
-
-      if (extensionReady) {
-        // Extension found — check for existing sessions
-        await this.checkSessions();
-      } else {
-        this.state = 'install';
-        this.render();
-      }
     }
 
     // Check for existing connected sessions
@@ -291,7 +303,8 @@
         }
 
         // Open pairing URL
-        const pairingUrl = this.apiUrl + '/pair/' + data.pairing_token;
+        // Pairing link must be the full Hanzi URL (opens in new tab, not relative)
+        const pairingUrl = (this.apiUrl || API_URL) + '/pair/' + data.pairing_token;
         window.open(pairingUrl, '_blank');
 
         // Poll for connection
@@ -310,7 +323,7 @@
           } catch {}
         }, 2000);
 
-        // Timeout after 60s
+        // Timeout after 3 minutes
         setTimeout(() => {
           if (this.pollInterval) {
             clearInterval(this.pollInterval);
@@ -318,7 +331,7 @@
             this.state = 'pair';
             this.render();
           }
-        }, 60000);
+        }, 180000);
       } catch {
         this.state = 'pair';
         this.render();
@@ -382,13 +395,9 @@
 
     // Cleanup
     destroy() {
-      if (this.pollInterval) {
-        clearInterval(this.pollInterval);
-        this.pollInterval = null;
-      }
-      if (this.container) {
-        this.container.innerHTML = '';
-      }
+      if (this.pollInterval) { clearInterval(this.pollInterval); this.pollInterval = null; }
+      if (this.installPoll) { clearInterval(this.installPoll); this.installPoll = null; }
+      if (this.container) { this.container.innerHTML = ''; }
     }
   }
 

@@ -3,51 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>X Marketing — Hanzi</title>
+  <title>X Marketing — Free Tool by Hanzi Browse</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%231a1a1a'/><path d='M7 7v10M17 7v10M7 12h10' stroke='%23fafaf8' stroke-width='2.5' stroke-linecap='round'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg: #f7f3ea; --surface: #fffdf8; --ink: #1f1711; --muted: #6d6256;
       --line: #e5ddd0; --accent: #ad5a34; --accent-hover: #8d4524;
       --green: #2f4a3d; --green-bg: #eef5f0; --blue: #1d6fa5; --blue-bg: #eef3f8;
       --red: #9a2e2e; --red-bg: #fef0ef;
+      --approved-bg: var(--approved-bg); --direct-bg: var(--direct-bg); --direct-text: var(--direct-text); --placeholder: var(--placeholder);
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { min-height: 100vh; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
 
-    /* Shell */
-    .shell { max-width: 560px; margin: 0 auto; padding: 24px 16px 100px; }
+    .shell { max-width: 720px; margin: 0 auto; padding: 24px 32px 100px; }
 
-    /* Header */
     .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
     .brand svg { width: 32px; height: 32px; }
     .brand span { font-size: 15px; font-weight: 700; color: var(--ink); }
 
-    /* Typography */
-    h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; margin-bottom: 8px; }
-    .subtitle { color: var(--muted); font-size: 15px; line-height: 1.5; margin-bottom: 28px; }
+    h1 { font-family: 'Instrument Serif', Georgia, serif; font-size: 32px; font-weight: 400; letter-spacing: -0.01em; line-height: 1.15; margin-bottom: 10px; }
+    .subtitle { color: var(--muted); font-size: 15px; line-height: 1.5; margin-bottom: 24px; }
 
-    /* Form */
     .field { margin-bottom: 16px; }
     .field label { display: block; font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
     .field .hint { color: var(--muted); font-weight: 400; }
     .field input, .field textarea { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 15px; color: var(--ink); background: var(--surface); outline: none; font-family: inherit; resize: none; transition: border-color 0.15s; }
     .field input:focus, .field textarea:focus { border-color: var(--accent); }
-    .field input::placeholder, .field textarea::placeholder { color: #b8ad9e; }
+    .field input::placeholder, .field textarea::placeholder { color: var(--placeholder); }
 
-    /* Buttons */
     .btn { border: none; border-radius: 10px; padding: 12px 24px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .btn-primary { background: var(--accent); color: #fff; width: 100%; }
     .btn-primary:hover { background: var(--accent-hover); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-sm { padding: 6px 14px; font-size: 13px; border-radius: 8px; width: auto; }
+    .btn-sm { padding: 10px 16px; font-size: 13px; border-radius: 8px; width: auto; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
     .btn-approve { background: var(--green); color: #fff; }
     .btn-approve:hover { opacity: 0.9; }
     .btn-ghost { background: none; color: var(--muted); border: 1px solid var(--line); }
     .btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
 
-    /* Progress stepper */
     .stepper { margin: 32px 0; }
-    .step { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; position: relative; }
+    .step { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; }
     .step-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--muted); transition: all 0.3s; }
     .step.active .step-dot { border-color: var(--accent); color: var(--accent); animation: pulse 1.5s infinite; }
     .step.done .step-dot { border-color: var(--green); background: var(--green); color: #fff; }
@@ -56,8 +56,11 @@
     .step.done .step-label { color: var(--green); }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-    /* Draft card */
-    .draft-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+    .draft-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 12px; transition: opacity 0.2s, border-color 0.2s; }
+    .draft-card.is-posting { opacity: 0.6; pointer-events: none; }
+    .draft-card.is-posted { background: var(--green-bg); border-color: var(--green); }
+    .draft-card.is-failed { border-color: var(--red); background: var(--red-bg); }
+    .draft-card.is-approved { border-color: var(--green); background: var(--approved-bg); }
     .draft-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
     .draft-author { display: flex; gap: 10px; align-items: center; }
     .avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--line); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: var(--muted); flex-shrink: 0; }
@@ -65,89 +68,118 @@
     .author-handle { color: var(--muted); font-size: 13px; }
     .author-followers { color: var(--muted); font-size: 12px; }
 
-    /* Tweet + reply */
     .original-tweet { background: var(--bg); padding: 10px 12px; border-radius: 10px; font-size: 14px; line-height: 1.5; color: var(--ink); margin-bottom: 10px; }
     .draft-reply { background: var(--green-bg); border-left: 3px solid var(--green); padding: 10px 12px; border-radius: 0 10px 10px 0; font-size: 14px; line-height: 1.5; margin-bottom: 8px; }
     .draft-meta { font-size: 12px; color: var(--muted); font-style: italic; margin-bottom: 10px; }
-    .draft-actions { display: flex; gap: 8px; }
+    .draft-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-    /* Type badges */
     .type-tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
     .type-helpful { background: var(--green-bg); color: var(--green); }
     .type-mention { background: var(--blue-bg); color: var(--blue); }
-    .type-direct { background: #fef5ee; color: #8a5a2e; }
+    .type-direct { background: var(--direct-bg); color: var(--direct-text); }
 
-    /* Keyword chips */
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .chip { background: var(--surface); border: 1px solid var(--line); padding: 4px 10px; border-radius: 16px; font-size: 13px; color: var(--ink); }
+    .chip { background: var(--surface); border: 1px solid var(--line); padding: 4px 10px; border-radius: 16px; font-size: 13px; color: var(--ink); cursor: pointer; min-height: 36px; display: inline-flex; align-items: center; }
+    .chip:hover { border-color: var(--red); color: var(--red); }
+    .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-    /* Strategy summary */
     .strategy-bar { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
     .strategy-bar-info { font-size: 13px; color: var(--muted); }
     .strategy-bar-info strong { color: var(--ink); }
 
-    /* Post bar */
     .post-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 12px; z-index: 10; }
-    .post-bar-inner { max-width: 560px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
+    .post-bar-inner { max-width: 720px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
     .post-bar-info { font-size: 14px; color: var(--muted); }
     .post-bar-info strong { color: var(--ink); }
 
-    /* Empty state */
     .empty { text-align: center; padding: 48px 0; }
     .empty p { color: var(--muted); font-size: 14px; margin-top: 8px; }
 
-    /* Toast */
     .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--surface); padding: 10px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; z-index: 100; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
     .toast.show { opacity: 1; }
 
-    /* Edit */
     .edit-area { width: 100%; border: 1px solid var(--accent); border-radius: 8px; padding: 8px; font-size: 14px; color: var(--ink); background: var(--surface); resize: none; outline: none; font-family: inherit; margin-top: 6px; }
 
-    /* Section divider */
     .divider { display: flex; align-items: center; gap: 12px; margin: 20px 0; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
     .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 
-    /* Posted item */
-    .posted-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
-    .posted-item a { color: var(--accent); text-decoration: none; }
-    .posted-time { color: var(--muted); font-size: 12px; }
+    .legend { font-size: 12px; color: var(--muted); padding: 8px 0; display: flex; gap: 12px; flex-wrap: wrap; }
 
-    /* Pairing */
-    .pair-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; text-align: center; margin: 24px 0; }
-    .pair-card h3 { font-size: 18px; margin-bottom: 8px; }
-    .pair-card p { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
+    .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+    .status-posting { background: var(--direct-bg); color: var(--direct-text); }
+    .status-posted { background: var(--green-bg); color: var(--green); }
+    .status-failed { background: var(--red-bg); color: var(--red); }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner-sm { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+
+    .success-banner { background: var(--green-bg); border: 1px solid var(--green); border-radius: 12px; padding: 16px; margin-bottom: 16px; text-align: center; }
+    .success-banner h3 { color: var(--green); font-size: 16px; margin-bottom: 4px; }
+    .success-banner p { color: var(--muted); font-size: 13px; }
+
+    /* Hero */
+    .hero h1 { font-size: 40px; line-height: 1.1; margin-bottom: 14px; }
+    .hero-sub { font-size: 17px; color: var(--muted); line-height: 1.5; margin-bottom: 32px; max-width: 480px; }
+    .hero-cta { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
+    .hero-cta .btn-primary { width: auto; padding: 14px 32px; font-size: 16px; }
+    .hero-cta-note { font-size: 13px; color: var(--muted); line-height: 1.4; }
+
+    /* Demo preview */
+    .hero-demo { margin: 0 0 24px; pointer-events: none; position: relative; }
+    .hero-demo-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 8px; }
+    .hero-demo .draft-card { margin-bottom: 0; transform: scale(0.92); transform-origin: top left; box-shadow: 0 4px 24px rgba(31,23,17,0.08); }
+
+    /* Features */
+    .hero-features { display: flex; gap: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+    .hero-feature { flex: 1; }
+    .hero-feature-title { font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 2px; }
+    .hero-feature-desc { font-size: 12px; color: var(--muted); line-height: 1.4; }
   </style>
 </head>
 <body>
-<script src="https://api.hanzilla.co/embed.js"></script>
+<script src="embed.js"></script>
+<script>!function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey identify".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);posthog.init('phc_SNXFKD8YOBPvBNWWZnuCe7stDsJJNJ5WS8MujKhajIF',{api_host:'https://us.i.posthog.com',person_profiles:'anonymous'})</script>
 <div class="shell">
-  <!-- Brand -->
-  <div class="brand">
-    <svg viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#1a1a1a"/><path d="M7 7v10M17 7v10M7 12h10" stroke="#fafaf8" stroke-width="2.5" stroke-linecap="round"/></svg>
+  <div class="brand" role="banner">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#1a1a1a"/><path d="M7 7v10M17 7v10M7 12h10" stroke="#fafaf8" stroke-width="2.5" stroke-linecap="round"/></svg>
     <span>X Marketing</span>
   </div>
 
-  <div id="app"></div>
+  <main id="app"></main>
 
-  <!-- Powered by -->
   <div style="text-align:center;padding:24px 0 8px;font-size:12px;color:var(--muted)">
-    Powered by <a href="https://browse.hanzilla.co" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600">Hanzi Browse</a> — give your AI agent a real browser
+    Built with <a href="https://browse.hanzilla.co" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600">Hanzi Browse</a>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
 let sid = null;
 let product = null;
 let allDrafts = [];
-let screen = 'setup'; // setup | working | feed | posted
+let screen = 'landing';
+let postingInProgress = false;
 
 const $ = s => document.getElementById(s);
+
+function esc(s) {
+  if (s == null) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// Base path — works both locally (/) and behind Caddy (/x-marketing/)
+const BASE = location.pathname.replace(/\/$/, '');
+
 const api = async (m, p, b) => {
   try {
-    const r = await fetch(p, { method: m, headers: {'Content-Type':'application/json'}, body: b ? JSON.stringify(b) : undefined });
-    return r.json();
+    const url = p.startsWith('/') ? BASE + p : p;
+    const r = await fetch(url, { method: m, headers: {'Content-Type':'application/json'}, body: b ? JSON.stringify(b) : undefined });
+    const data = await r.json();
+    if (r.status === 429) { toast(data.error || 'Rate limit reached'); return null; }
+    return data;
   } catch (e) {
     console.error('API error:', m, p, e.message);
     return null;
@@ -164,8 +196,7 @@ function toast(m) {
 const typeLabels = { A: 'Helpful reply', B: 'Soft mention', C: 'Direct pitch' };
 const typeClasses = { A: 'type-helpful', B: 'type-mention', C: 'type-direct' };
 
-// ── Init ──
-// ── Local storage ──
+// ── Persistence ──
 function save() {
   localStorage.setItem('xm_product', JSON.stringify(product));
   localStorage.setItem('xm_drafts', JSON.stringify(allDrafts));
@@ -173,6 +204,20 @@ function save() {
 function load() {
   try { product = JSON.parse(localStorage.getItem('xm_product')); } catch {}
   try { allDrafts = JSON.parse(localStorage.getItem('xm_drafts')) || []; } catch {}
+  let changed = false;
+  for (const d of allDrafts) {
+    if (d.status === 'posting') { d.status = 'approved'; changed = true; }
+  }
+  if (changed) save();
+}
+
+async function checkBrowser() {
+  try {
+    const s = await api('GET', '/api/sessions');
+    const c = (s?.sessions || []).find(x => x.status === 'connected');
+    if (c) { sid = c.id; return true; }
+  } catch {}
+  return false;
 }
 
 async function init() {
@@ -180,49 +225,107 @@ async function init() {
   if (product && product.name) {
     screen = allDrafts.length > 0 ? 'feed' : 'strategy';
   }
-  try {
-    const s = await api('GET', '/api/sessions');
-    if (s) {
-      const c = (s.sessions || []).find(x => x.status === 'connected');
-      if (c) sid = c.id;
-    }
-  } catch {}
+  await checkBrowser();
   render();
 }
 
-// ── Render ──
+// ── Render router ──
 function render() {
-  if (screen === 'setup') renderSetup();
+  removePostBar();
+  if (screen === 'landing') renderLanding();
+  else if (screen === 'setup') renderSetup();
   else if (screen === 'strategy') renderStrategy();
-  else if (screen === 'working') {} // controlled by flow functions
-  else if (screen === 'posted') renderPosted();
+  else if (screen === 'working') {}
   else renderFeed();
 }
 
-function renderSetup() {
+function removePostBar() {
+  const el = document.querySelector('.post-bar');
+  if (el) el.remove();
+}
+
+// ── Landing ──
+function renderLanding() {
+  if (typeof posthog !== 'undefined') posthog.capture('tool_landing_viewed');
   $('app').innerHTML = `
-    <h1>Find people talking about your product on X</h1>
-    <p class="subtitle">We use AI to find relevant conversations, then open your real Chrome to search X and draft personalized replies. You approve before anything gets posted.</p>
+    <div class="hero">
+      <h1>Find your next customers on X</h1>
+      <p class="hero-sub">AI finds people talking about your problem on X and drafts replies. You approve, your Chrome posts.</p>
 
-    <div class="field">
-      <label>Product name</label>
-      <input id="f-name" placeholder="Hanzi Browse" value="${product?.name || ''}" />
-    </div>
-    <div class="field">
-      <label>Website <span class="hint">(optional — we'll read it for better results)</span></label>
-      <input id="f-url" placeholder="https://browse.hanzilla.co" value="${product?.url || ''}" />
-    </div>
-    <div class="field">
-      <label>What does it do?</label>
-      <textarea id="f-desc" rows="2" placeholder="Give your AI agent a real browser">${product?.description || ''}</textarea>
-    </div>
+      <div class="hero-cta">
+        <button class="btn btn-primary" onclick="screen='setup';render()">Try it free</button>
+        <span class="hero-cta-note">5 minutes. No account.<br>You approve every reply.</span>
+      </div>
+      ${!/Chrome/.test(navigator.userAgent) || /Edg/.test(navigator.userAgent) ? '<p style="font-size:13px;color:var(--red);margin-top:8px">This tool requires Google Chrome. <a href="https://google.com/chrome" target="_blank" style="color:var(--accent)">Download Chrome</a></p>' : ''}
 
-    <button class="btn btn-primary" onclick="startFlow()">Find my audience</button>
+      <div class="hero-demo">
+        <div class="draft-card">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:10px">Found on X</div>
+          <div class="draft-header">
+            <div class="draft-author">
+              <div class="avatar">S</div>
+              <div>
+                <div class="author-name">Sarah Chen <span class="author-handle">@sarahcodes</span></div>
+                <div class="author-followers">4.2K followers</div>
+              </div>
+            </div>
+          </div>
+          <div class="original-tweet">anyone know a good tool for automating browser tasks? selenium feels ancient and playwright is overkill for what I need</div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin:12px 0 6px;display:flex;align-items:center;gap:8px"><span style="color:var(--green)">&#10038;</span> AI-drafted reply</div>
+          <div class="draft-reply">honestly check out Hanzi Browse, it gives your AI agent a real browser. way simpler than selenium - browse.hanzilla.co</div>
+          <div class="draft-actions">
+            <span class="btn btn-approve btn-sm">Approve</span>
+            <span class="btn btn-ghost btn-sm">Edit</span>
+            <span class="btn btn-ghost btn-sm">Skip</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-features">
+        <div class="hero-feature">
+          <div class="hero-feature-title">Real browser, real account</div>
+          <div class="hero-feature-desc">Posts from your logged-in Chrome. No fake accounts or API tokens.</div>
+        </div>
+        <div class="hero-feature">
+          <div class="hero-feature-title">AI-drafted replies</div>
+          <div class="hero-feature-desc">Sounds human, not like a bot. Matches the tone of each conversation.</div>
+        </div>
+        <div class="hero-feature">
+          <div class="hero-feature-title">You stay in control</div>
+          <div class="hero-feature-desc">Review, edit, or skip every reply before it goes live.</div>
+        </div>
+      </div>
+    </div>
   `;
 }
 
-// ── Phase 1: Analyze product (no browser needed) ──
+// ── Setup ──
+function renderSetup() {
+  $('app').innerHTML = `
+    <h1>What are you building?</h1>
+    <p class="subtitle">We'll find relevant conversations on X and draft replies for you.</p>
+
+    <div class="field">
+      <label for="f-name">Product name</label>
+      <input id="f-name" placeholder="e.g. Hanzi Browse" value="${esc(product?.name)}" />
+    </div>
+    <div class="field">
+      <label for="f-url">Website <span class="hint">(we'll read it for better results)</span></label>
+      <input id="f-url" placeholder="https://..." value="${esc(product?.url)}" />
+    </div>
+    <div class="field">
+      <label for="f-desc">Describe it in one sentence</label>
+      <textarea id="f-desc" rows="2" placeholder="e.g. Give your AI agent a real browser">${esc(product?.description)}</textarea>
+    </div>
+
+    <button class="btn btn-primary" onclick="startFlow()">Generate my strategy</button>
+    <button class="btn btn-ghost" onclick="screen='landing';render()" style="width:100%;margin-top:8px">Back</button>
+  `;
+}
+
+// ── Phase 1: Analyze ──
 async function startFlow() {
+  if (typeof posthog !== 'undefined') posthog.capture('tool_setup_started');
   const name = $('f-name').value.trim();
   const url = $('f-url').value.trim();
   const desc = $('f-desc').value.trim();
@@ -234,105 +337,116 @@ async function startFlow() {
     ...(url ? [{ label: 'Reading your website', done: false, active: false }] : []),
   ];
 
-  function renderAnalyzeSteps() {
+  function renderSteps() {
     $('app').innerHTML = `
-      <h1>Understanding your product...</h1>
-      <p class="subtitle">We're analyzing your product to find the right audience.</p>
-      <div class="stepper">
+      <h1>Generating strategy...</h1>
+      <p class="subtitle">AI is analyzing your product to find the right audience on X.</p>
+      <div class="stepper" role="progressbar">
         ${steps.map((s, i) => `
           <div class="step ${s.done ? 'done' : s.active ? 'active' : ''}">
-            <div class="step-dot">${s.done ? '\u2713' : i + 1}</div>
-            <div class="step-label">${s.label}</div>
+            <div class="step-dot" aria-hidden="true">${s.done ? '\u2713' : i + 1}</div>
+            <div class="step-label">${esc(s.label)}</div>
           </div>
         `).join('')}
       </div>
     `;
   }
 
-  renderAnalyzeSteps();
+  renderSteps();
 
   try {
-    // Step 1: Analyze from description
     const analyzeResult = await api('POST', '/api/analyze', { name, url, description: desc });
     if (!analyzeResult || analyzeResult.error) throw new Error(analyzeResult?.error || 'Analysis failed');
     product = analyzeResult;
     steps[0].done = true;
 
-    // Step 2: Read website if URL provided
     if (url) {
-      steps[1].active = true;
-      renderAnalyzeSteps();
-
-      const browserSid = await ensureBrowser(() => {});
-      if (browserSid) {
+      // Only read the URL if browser is already connected — don't interrupt flow for new users
+      if (sid || await checkBrowser()) {
+        steps[1].active = true;
+        renderSteps();
         try {
-          const readResult = await api('POST', '/api/read-url', { browser_session_id: browserSid, url });
+          const readResult = await api('POST', '/api/read-url', { browser_session_id: sid, url });
           if (readResult?.content) {
             const betterResult = await api('POST', '/api/analyze', { name, url, description: desc, page_content: readResult.content });
             if (betterResult && !betterResult.error) product = betterResult;
           }
         } catch (e) { console.log('URL read failed, using basic analysis'); }
+        steps[1].done = true;
       }
-      steps[1].done = true;
     }
 
-    // Show strategy review screen
     save();
     screen = 'strategy';
     renderStrategy();
   } catch (err) {
     const msg = err.message || 'Unknown error';
     $('app').innerHTML = `
-      <div class="draft-card" style="border-color:var(--red);background:var(--red-bg)">
-        <h3 style="color:var(--red);margin-bottom:8px">Analysis failed</h3>
-        <p style="font-size:14px;color:var(--ink);margin-bottom:12px">${msg}</p>
-        ${msg.includes('exhausted') || msg.includes('credits') ? '<p style="font-size:13px;color:var(--muted)">Reading your website uses 1 task credit. <a href="https://api.hanzilla.co/dashboard" target="_blank" style="color:var(--accent)">Add credits \u2192</a></p>' : ''}
+      <div class="draft-card is-failed">
+        <h3 style="color:var(--red);margin-bottom:8px">Something went wrong</h3>
+        <p style="font-size:14px;color:var(--ink);margin-bottom:12px">${esc(msg)}</p>
       </div>
       <button class="btn btn-primary" onclick="screen='setup';render()" style="margin-top:12px">Try again</button>
     `;
   }
 }
 
-// ── Strategy review (between Phase 1 and 2) ──
+// ── Strategy review ──
 function renderStrategy() {
   const p = product;
   $('app').innerHTML = `
-    <h1>Here's your strategy</h1>
-    <p class="subtitle">Review and edit keywords, then search X.</p>
+    <h1>Your strategy</h1>
+    <p class="subtitle">Review keywords, then we'll search X.</p>
 
     <div class="draft-card">
       <div style="margin-bottom:12px">
-        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">Keywords to search <span style="font-weight:400">(click to remove, type to add)</span></div>
-        <div class="chips" id="keyword-chips">
-          ${(p.keywords || []).map((k, i) => `<span class="chip" style="cursor:pointer" onclick="removeKeyword(${i})">${k} <span style="margin-left:4px;opacity:0.5">\u00d7</span></span>`).join('')}
+        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">Keywords <span style="font-weight:400">(click to remove)</span></div>
+        <div class="chips" role="list" aria-label="Search keywords">
+          ${(p.keywords || []).map((k, i) => `<span class="chip" role="button" tabindex="0" aria-label="Remove ${esc(k)}" onclick="removeKeyword(${i})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();removeKeyword(${i})}">${esc(k)} <span aria-hidden="true" style="margin-left:4px;opacity:0.5">&times;</span></span>`).join('')}
         </div>
         <div style="margin-top:8px;display:flex;gap:6px">
-          <input id="new-keyword" placeholder="Add keyword..." style="flex:1;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;background:var(--surface);color:var(--ink);outline:none" onkeydown="if(event.key==='Enter'){addKeyword()}" />
+          <input id="new-keyword" placeholder="Add keyword..." aria-label="New keyword" style="flex:1;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;background:var(--surface);color:var(--ink);outline:none;min-height:44px" onkeydown="if(event.key==='Enter'){addKeyword()}" />
           <button class="btn btn-ghost btn-sm" onclick="addKeyword()">Add</button>
         </div>
       </div>
       <div style="margin-bottom:12px">
-        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">Target audience</div>
-        <div style="font-size:14px">${p.audience || ''}</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">Audience</div>
+        <div style="font-size:14px">${esc(p.audience)}</div>
       </div>
-      <div>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">One-liner for replies</div>
-        <div style="font-size:14px">${p.product_pitch || ''}</div>
+      <div style="margin-bottom:12px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:4px">Reply pitch</div>
+        <div style="font-size:14px">${esc(p.product_pitch)}</div>
       </div>
+      ${p.voice || p.pain_points ? `<details style="border-top:1px solid var(--line);padding-top:10px">
+        <summary style="font-size:12px;color:var(--muted);cursor:pointer">Voice & pain points</summary>
+        <div style="margin-top:8px;font-size:13px;color:var(--ink)">
+          ${p.voice?.tone ? '<div style="margin-bottom:6px"><span style="color:var(--muted)">Tone:</span> ' + esc(p.voice.tone) + '</div>' : ''}
+          ${p.voice?.style ? '<div style="margin-bottom:6px"><span style="color:var(--muted)">Style:</span> ' + esc(p.voice.style) + '</div>' : ''}
+          ${p.pain_points?.length ? '<div><span style="color:var(--muted)">Pain points:</span> ' + p.pain_points.map(pp => esc(pp)).join(' · ') + '</div>' : ''}
+        </div>
+      </details>` : ''}
     </div>
 
-    <button class="btn btn-primary" onclick="startSearch()" style="margin-top:8px">Search X for conversations</button>
+    <div class="legend" aria-label="Reply types">
+      <span><span class="type-tag type-helpful">Helpful</span> pure value</span>
+      <span><span class="type-tag type-mention">Mention</span> value + product</span>
+      <span><span class="type-tag type-direct">Direct</span> recommendation</span>
+    </div>
+
+    ${allDrafts.length > 0
+      ? `<button class="btn btn-primary" onclick="screen='feed';render()" style="margin-top:8px">Back to drafts</button>
+         <button class="btn btn-ghost" onclick="startSearch()" style="width:100%;margin-top:8px">Search again with these keywords</button>`
+      : `<button class="btn btn-primary" onclick="startSearch()" style="margin-top:8px">Search X for conversations</button>`}
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="btn btn-ghost" onclick="screen='setup';render()" style="flex:1">Edit product</button>
-      <button class="btn btn-ghost" onclick="product=null;allDrafts=[];localStorage.clear();screen='setup';render()" style="flex:1;font-size:13px;color:var(--muted)">Start over</button>
+      <button class="btn btn-ghost" onclick="if(confirm('This will clear your product and all drafts.')){product=null;allDrafts=[];localStorage.clear();screen='landing';render()}" style="flex:1;font-size:13px;color:var(--muted)">Start over</button>
     </div>
   `;
 }
 
 function removeKeyword(idx) {
   product.keywords.splice(idx, 1);
-  save();
-  renderStrategy();
+  save(); renderStrategy();
 }
 
 function addKeyword() {
@@ -340,92 +454,160 @@ function addKeyword() {
   const val = input.value.trim();
   if (!val || product.keywords.includes(val)) return;
   product.keywords.push(val);
-  save();
-  renderStrategy();
+  save(); renderStrategy();
 }
 
-// ── Phase 2: Search X + draft replies (needs browser) ──
+// ── Phase 2: Search + draft ──
+let searchTimer = null;
+
 async function startSearch() {
   screen = 'working';
-  const steps = [
-    { label: 'Searching X for conversations', done: false, active: true },
-    { label: 'Drafting replies', done: false, active: false },
-  ];
+  const keywords = (product.keywords || []).slice(0, 3);
+  const kwStatus = keywords.map(k => ({ keyword: k, status: 'waiting', answer: null }));
+  let phase = 'search'; // search | extract | draft
 
-  let searchTaskId = null;
+  function renderSearchProgress() {
+    const elapsed = searchTimer ? Math.floor((Date.now() - searchTimer) / 1000) : 0;
+    const min = Math.floor(elapsed / 60);
+    const sec = String(elapsed % 60).padStart(2, '0');
 
-  function renderSearchSteps() {
     $('app').innerHTML = `
       <h1>Searching X...</h1>
-      <p class="subtitle">Hanzi Browse is searching X from your real Chrome. This takes 2\u20134 minutes.</p>
-      <div class="stepper">
-        ${steps.map((s, i) => `
-          <div class="step ${s.done ? 'done' : s.active ? 'active' : ''}">
-            <div class="step-dot">${s.done ? '\u2713' : i + 1}</div>
-            <div class="step-label">${s.label}</div>
+      <p class="subtitle" style="display:flex;justify-content:space-between">
+        <span>Your browser is searching X for conversations.</span>
+        <span id="elapsed" style="font-variant-numeric:tabular-nums">${min}:${sec}</span>
+      </p>
+
+      <div style="margin:20px 0">
+        ${kwStatus.map(k => `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:4px;background:var(--surface);border-radius:8px;border:1px solid ${k.status === 'done' ? 'var(--green)' : k.status === 'error' ? 'var(--red)' : 'var(--line)'};font-size:14px">
+            ${k.status === 'searching' ? '<span class="spinner-sm"></span>' :
+              k.status === 'done' ? '<span style="color:var(--green);font-size:16px;font-weight:700;width:14px;text-align:center">\u2713</span>' :
+              k.status === 'error' ? '<span style="color:var(--red);font-size:16px;font-weight:700;width:14px;text-align:center">\u2717</span>' :
+              '<span style="color:var(--muted);width:14px;text-align:center">\u00b7</span>'}
+            <span style="flex:1;${k.status === 'error' ? 'color:var(--muted)' : ''}">${esc(k.keyword)}</span>
+            ${k.status === 'done' ? '<span style="color:var(--muted);font-size:12px">found tweets</span>' :
+              k.status === 'error' ? '<span style="color:var(--muted);font-size:12px">timed out</span>' :
+              k.status === 'searching' ? '<span style="color:var(--muted);font-size:12px">searching...</span>' : ''}
           </div>
         `).join('')}
       </div>
-      <div style="margin-top:24px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px">
-        <svg viewBox="0 0 24 24" fill="none" style="width:16px;height:16px;flex-shrink:0"><rect width="24" height="24" rx="6" fill="#1a1a1a"/><path d="M7 7v10M17 7v10M7 12h10" stroke="#fafaf8" stroke-width="2.5" stroke-linecap="round"/></svg>
-        Your browser is being controlled by <a href="https://browse.hanzilla.co" target="_blank" style="color:var(--accent);text-decoration:none;font-weight:600">Hanzi Browse SDK</a>
+
+      ${phase === 'extract' ? '<p style="font-size:13px;color:var(--muted);text-align:center">Extracting tweets from results...</p>' :
+        phase === 'draft' ? '<p style="font-size:13px;color:var(--muted);text-align:center">AI is drafting replies...</p>' : ''}
+
+      <div style="margin-top:16px;text-align:center">
+        <button class="btn btn-ghost btn-sm" style="font-size:12px;color:var(--red)" onclick="cancelSearch()">Stop search</button>
       </div>
-      ${searchTaskId ? `<div style="margin-top:8px;font-size:11px;color:var(--muted);font-family:monospace">Task: ${searchTaskId}</div>` : ''}
     `;
   }
 
-  renderSearchSteps();
+  // Start elapsed timer
+  searchTimer = Date.now();
+  const timerInterval = setInterval(() => {
+    const el = document.getElementById('elapsed');
+    if (el) {
+      const s = Math.floor((Date.now() - searchTimer) / 1000);
+      el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }
+  }, 1000);
+
+  renderSearchProgress();
 
   try {
-    const browserSid = sid || await ensureBrowser(() => {});
-    if (!browserSid) throw new Error('Browser connection needed to search X');
+    // Re-check for fresh session
+    sid = null;
+    await checkBrowser();
+    const browserSid = sid || await ensureBrowser();
+    if (!browserSid) { clearInterval(timerInterval); throw new Error('Browser not connected'); }
 
-    // Step 1: Search
-    const searchResult = await api('POST', '/api/search', { browser_session_id: browserSid, keywords: product.keywords });
-    if (!searchResult || searchResult.error) throw new Error(searchResult?.error || 'Search failed');
-    if (searchResult.task_id) { searchTaskId = searchResult.task_id; renderSearchSteps(); }
-    if (!searchResult.tweets?.length) throw new Error('No tweets found (task: ' + (searchResult.task_id || 'unknown') + '). The agent browsed X but didn\u2019t return data. Try again.');
-    steps[0].done = true;
-    steps[1].active = true;
-    renderSearchSteps();
+    renderSearchProgress();
 
-    // Step 2: Draft replies
-    const draftResult = await api('POST', '/api/draft', { tweets: searchResult.tweets });
-    if (!draftResult || draftResult.error) throw new Error(draftResult?.error || 'Drafting failed');
-    allDrafts = draftResult.drafts || [];
-    steps[1].done = true;
+    // Search each keyword in parallel, update UI as each completes
+    const promises = keywords.map(async (keyword, i) => {
+      kwStatus[i].status = 'searching';
+      renderSearchProgress();
+      try {
+        const result = await api('POST', '/api/search-one', { browser_session_id: browserSid, keyword });
+        if (result?.status === 'complete' && result.answer && result.answer.length > 50) {
+          kwStatus[i].status = 'done';
+          kwStatus[i].answer = result.answer;
+        } else {
+          kwStatus[i].status = 'error';
+        }
+      } catch {
+        kwStatus[i].status = 'error';
+      }
+      renderSearchProgress();
+    });
+
+    await Promise.allSettled(promises);
+
+    // Combine successful results
+    const summaries = kwStatus
+      .filter(k => k.status === 'done' && k.answer)
+      .map(k => `--- Results for "${k.keyword}" ---\n${k.answer}`)
+      .join('\n\n');
+
+    if (!summaries) { clearInterval(timerInterval); throw new Error('No tweets found across any keyword. Try different keywords.'); }
+
+    // Extract tweets
+    phase = 'extract';
+    renderSearchProgress();
+    const extractResult = await api('POST', '/api/extract', { summaries });
+    if (!extractResult?.tweets?.length) { clearInterval(timerInterval); throw new Error('Could not extract tweets from results.'); }
+
+    // Draft replies
+    phase = 'draft';
+    renderSearchProgress();
+    const draftResult = await api('POST', '/api/draft', { tweets: extractResult.tweets, product });
+    if (!draftResult || draftResult.error) { clearInterval(timerInterval); throw new Error(draftResult?.error || 'Drafting failed'); }
+
+    clearInterval(timerInterval);
+
+    allDrafts = (draftResult.drafts || []).filter(d => {
+      const reply = (d.reply_text || '').toLowerCase();
+      return !reply.startsWith('skip') && !reply.includes('bot account') && !reply.includes('not recommended');
+    });
 
     save();
-    toast(allDrafts.length + ' draft replies ready!');
+    toast(allDrafts.length + ' drafts ready!');
     screen = 'feed';
     render();
   } catch (err) {
+    clearInterval(timerInterval);
     const msg = err.message || 'Unknown error';
-    // Show error inline instead of silently going back
     $('app').innerHTML = `
-      <div class="draft-card" style="border-color:var(--red);background:var(--red-bg)">
+      <div class="draft-card is-failed">
         <h3 style="color:var(--red);margin-bottom:8px">Search failed</h3>
-        <p style="font-size:14px;color:var(--ink);margin-bottom:12px">${msg}</p>
-        ${msg.includes('exhausted') || msg.includes('credits') ? '<p style="font-size:13px;color:var(--muted)">Each keyword search uses 1 task credit. <a href="https://api.hanzilla.co/dashboard" target="_blank" style="color:var(--accent)">Add credits \u2192</a></p>' : ''}
-        ${msg.includes('Browser') || msg.includes('connected') ? '<p style="font-size:13px;color:var(--muted)">Make sure the Hanzi Browse extension is running in Chrome.</p>' : ''}
-        ${searchTaskId ? `<p style="font-size:11px;color:var(--muted);font-family:monospace;margin-top:8px">Task ID: ${searchTaskId}</p>` : ''}
+        <p style="font-size:14px;color:var(--ink);margin-bottom:12px">${esc(msg)}</p>
+        ${msg.includes('Rate limit') || msg.includes('429') ? '<p style="font-size:13px;color:var(--muted)">Daily limit reached. Come back tomorrow or <a href="https://browse.hanzilla.co" target="_blank" style="color:var(--accent)">get your own key</a>.</p>' : ''}
+        ${msg.includes('Browser') || msg.includes('connected') ? '<p style="font-size:13px;color:var(--muted)">Make sure the Hanzi Browse extension is running.</p>' : ''}
       </div>
       <button class="btn btn-primary" onclick="startSearch()" style="margin-top:12px">Try again</button>
-      <button class="btn btn-ghost" onclick="screen='strategy';renderStrategy()" style="margin-top:8px;width:100%">Edit keywords</button>
+      <button class="btn btn-ghost" onclick="screen='strategy';render()" style="margin-top:8px;width:100%">Edit keywords</button>
     `;
   }
 }
 
+// ── Browser connection ──
 async function ensureBrowser() {
   if (sid) return sid;
 
+  // Check if already connected before showing pairing UI
+  if (await checkBrowser()) return sid;
+
   return new Promise(resolve => {
-    // Use Hanzi Browse embeddable component if available
     if (typeof HanziConnect !== 'undefined') {
-      $('app').innerHTML = '<div id="hanzi-pair-widget" style="max-width:400px;margin:24px auto"></div>';
+      $('app').innerHTML = `
+        <h1>Connect your browser</h1>
+        <p class="subtitle">This tool needs the Hanzi Browse extension to search and post on X.</p>
+        <div id="hanzi-pair-widget" style="max-width:440px"></div>
+        <button class="btn btn-ghost btn-sm" id="refresh-connection" style="margin-top:12px;width:100%" onclick="this.textContent='Checking...';this.disabled=true">I've completed pairing \u2014 check again</button>
+      `;
       HanziConnect.mount('#hanzi-pair-widget', {
-        apiKey: 'hic_live_proxy', // Widget calls our server which proxies
-        apiUrl: '',               // Relative URLs — our server handles /v1/*
+        apiKey: 'hic_live_proxy',
+        apiUrl: BASE,
         purpose: 'search X and post replies on your behalf',
         onConnected: (sessionId) => {
           sid = sessionId;
@@ -433,14 +615,25 @@ async function ensureBrowser() {
           resolve(sid);
         },
       });
+      // Manual refresh button as fallback
+      $('refresh-connection').onclick = async function() {
+        this.textContent = 'Checking...';
+        this.disabled = true;
+        if (await checkBrowser()) {
+          toast('Browser connected!');
+          resolve(sid);
+        } else {
+          this.textContent = 'Not found \u2014 try again';
+          this.disabled = false;
+        }
+      };
     } else {
-      // Fallback: simple inline pairing
       $('app').innerHTML = `
         <div class="draft-card" style="text-align:center;max-width:400px;margin:24px auto">
           <h3 style="margin-bottom:8px">Connect your browser</h3>
-          <p style="color:var(--muted);font-size:14px;margin-bottom:16px">We need your Chrome to search X.</p>
-          <button class="btn btn-primary" style="width:auto" id="pair-fallback">Connect browser</button>
-          <div id="pair-status" style="margin-top:10px;font-size:13px;color:var(--muted)"></div>
+          <p style="color:var(--muted);font-size:14px;margin-bottom:16px">Install the <a href="https://browse.hanzilla.co" target="_blank" style="color:var(--accent);font-weight:600">Hanzi Browse</a> extension, then pair it.</p>
+          <button class="btn btn-primary" style="width:auto" id="pair-fallback">Pair browser</button>
+          <div id="pair-status" style="margin-top:10px;font-size:13px;color:var(--muted)" role="status"></div>
         </div>`;
       $('pair-fallback').onclick = async () => {
         $('pair-status').textContent = 'Opening pairing link...';
@@ -448,7 +641,7 @@ async function ensureBrowser() {
         if (!d?.pairing_url) { $('pair-status').textContent = 'Failed.'; resolve(null); return; }
         window.open(d.pairing_url, '_blank');
         $('pair-status').textContent = 'Complete pairing in the new tab...';
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 60; i++) {
           await new Promise(r => setTimeout(r, 2000));
           if (await checkBrowser()) { toast('Connected!'); resolve(sid); return; }
         }
@@ -459,28 +652,28 @@ async function ensureBrowser() {
   });
 }
 
+async function cancelSearch() {
+  try { await api('POST', '/api/cancel-search', { browser_session_id: sid }); } catch {}
+  toast('Search cancelled');
+  screen = 'strategy';
+  render();
+}
+
 // ── Feed ──
 function renderFeed() {
-  const pending = allDrafts.filter(d => d.status === 'pending' || d.status === 'approved');
-  const approvedN = allDrafts.filter(d => d.status === 'approved').length;
+  const pending = allDrafts.filter(d => d.status === 'pending');
+  const approved = allDrafts.filter(d => d.status === 'approved');
+  const posting = allDrafts.filter(d => d.status === 'posting');
+  const posted = allDrafts.filter(d => d.status === 'posted');
+  const failed = allDrafts.filter(d => d.status === 'failed');
+  const actionable = pending.length + approved.length + posting.length;
 
-  if (pending.length === 0 && allDrafts.length === 0) {
+  if (allDrafts.length === 0) {
     $('app').innerHTML = `
       <div class="empty">
         <h1>Ready to scout</h1>
-        <p>Search X for conversations about ${product?.name || 'your product'}.</p>
-        <button class="btn btn-primary" style="margin-top:20px;max-width:240px;margin-left:auto;margin-right:auto" onclick="startFlow()">Find conversations</button>
-      </div>`;
-    return;
-  }
-
-  if (pending.length === 0) {
-    $('app').innerHTML = `
-      <div class="empty">
-        <h1>All done!</h1>
-        <p>No more drafts to review.</p>
-        <button class="btn btn-primary" style="margin-top:20px;max-width:240px;margin-left:auto;margin-right:auto" onclick="startFlow()">Find more</button>
-        <br><button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="screen='posted';render()">View posted</button>
+        <p>Search X for conversations about ${esc(product?.name || 'your product')}.</p>
+        <button class="btn btn-primary" style="margin-top:20px;max-width:240px;margin-left:auto;margin-right:auto" onclick="startSearch()">Find conversations</button>
       </div>`;
     return;
   }
@@ -488,93 +681,135 @@ function renderFeed() {
   let html = `
     <div class="strategy-bar">
       <div class="strategy-bar-info">
-        <strong>${product?.name}</strong> \u00b7 ${pending.length} draft${pending.length === 1 ? '' : 's'}
+        <strong>${esc(product?.name)}</strong> &middot;
+        ${actionable > 0 ? actionable + ' to review' : ''}
+        ${actionable > 0 && posted.length > 0 ? ', ' : ''}
+        ${posted.length > 0 ? posted.length + ' posted' : ''}
+        ${actionable === 0 && posted.length === 0 && failed.length > 0 ? failed.length + ' failed' : ''}
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="screen='posted';render()">Posted</button>
-        <button class="btn btn-ghost btn-sm" onclick="screen='setup';render()">Edit</button>
+        ${pending.length > 0 ? `<button class="btn btn-approve btn-sm" onclick="approveAll()">Approve all</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="screen='strategy';render()" ${postingInProgress ? 'disabled' : ''}>Keywords</button>
       </div>
     </div>
   `;
 
-  html += pending.map(d => {
-    const initials = (d.author_name || '?')[0].toUpperCase();
-    const typeLabel = typeLabels[d.reply_type] || d.reply_type || '?';
-    const typeClass = typeClasses[d.reply_type] || 'type-helpful';
-    const isApproved = d.status === 'approved';
+  if (posted.length > 0 && actionable === 0 && failed.length === 0) {
+    html += `
+      <div class="success-banner">
+        <h3>\u2713 ${posted.length} ${posted.length === 1 ? 'reply' : 'replies'} posted</h3>
+        <p>Your replies are live on X.</p>
+      </div>
+      <button class="btn btn-primary" onclick="startSearch()" style="margin-bottom:16px">Find more conversations</button>
+    `;
+  }
 
-    return `
-    <div class="draft-card" id="d-${d.id}">
-      <div class="draft-header">
-        <div class="draft-author">
-          <div class="avatar">${initials}</div>
-          <div>
-            <div class="author-name">${d.author_name || 'Unknown'} <span class="author-handle">${d.author_handle || ''}</span></div>
-            <div class="author-followers">${d.author_followers ? d.author_followers.toLocaleString() + ' followers' : ''}</div>
-          </div>
-        </div>
-        <span class="type-tag ${typeClass}">${typeLabel}</span>
-      </div>
-      <div class="original-tweet">${d.tweet_text || ''}</div>
-      <div class="draft-reply" id="reply-${d.id}">${d.reply_text}</div>
-      ${d.reasoning ? '<div class="draft-meta">' + d.reasoning + '</div>' : ''}
-      <div class="draft-actions">
-        ${isApproved
-          ? '<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green);cursor:default">Approved</button>'
-          : `<button class="btn btn-approve btn-sm" onclick="approve('${d.id}')">Approve</button>` +
-            `<button class="btn btn-ghost btn-sm" onclick="editDraft('${d.id}')">Edit</button>` +
-            `<button class="btn btn-ghost btn-sm" onclick="skip('${d.id}')">Skip</button>`
-        }
-      </div>
-    </div>`;
-  }).join('');
+  if (failed.length > 0) {
+    html += '<div class="divider">Failed</div>';
+    html += failed.map(d => renderDraftCard(d)).join('');
+  }
+  if (posting.length > 0) {
+    html += '<div class="divider">Posting</div>';
+    html += posting.map(d => renderDraftCard(d)).join('');
+  }
+  const reviewable = [...approved, ...pending];
+  if (reviewable.length > 0) {
+    if (failed.length > 0 || posting.length > 0 || posted.length > 0) html += '<div class="divider">To review</div>';
+    html += reviewable.map(d => renderDraftCard(d)).join('');
+  }
+  if (posted.length > 0 && actionable > 0) {
+    html += '<div class="divider">Posted</div>';
+    html += posted.map(d => renderDraftCard(d)).join('');
+  }
 
   $('app').innerHTML = html;
 
-  // Post bar
-  const existing = document.querySelector('.post-bar');
-  if (existing) existing.remove();
-  if (approvedN > 0) {
+  if (approved.length > 0 && !postingInProgress) {
     const bar = document.createElement('div');
     bar.className = 'post-bar';
-    bar.innerHTML = `<div class="post-bar-inner"><div class="post-bar-info"><strong>${approvedN}</strong> approved</div><button class="btn btn-approve btn-sm" id="post-all" onclick="postAll()">Post all</button></div>`;
+    bar.innerHTML = `<div class="post-bar-inner">
+      <div class="post-bar-info"><strong>${approved.length}</strong> approved</div>
+      <button class="btn btn-approve btn-sm" onclick="confirmPost()">Post all</button>
+    </div>`;
     document.body.appendChild(bar);
   }
 }
 
-async function renderPosted() {
-  const data = await api('GET', '/api/posted');
-  const existing = document.querySelector('.post-bar');
-  if (existing) existing.remove();
+function renderDraftCard(d) {
+  const initials = (d.author_name || '?')[0].toUpperCase();
+  const typeLabel = typeLabels[d.reply_type] || d.reply_type || '';
+  const typeClass = typeClasses[d.reply_type] || 'type-helpful';
+  const status = d.status;
 
-  if (!data.length) {
-    $('app').innerHTML = `
-      <div class="empty">
-        <h1>No posts yet</h1>
-        <p>Approve some drafts and post them.</p>
-        <button class="btn btn-ghost btn-sm" style="margin-top:16px" onclick="screen='feed';render()">Back to drafts</button>
-      </div>`;
-    return;
+  let cardClass = '';
+  if (status === 'posting') cardClass = 'is-posting';
+  else if (status === 'posted') cardClass = 'is-posted';
+  else if (status === 'failed') cardClass = 'is-failed';
+  else if (status === 'approved') cardClass = 'is-approved';
+
+  let badge = '';
+  if (status === 'posting') badge = '<span class="status-badge status-posting"><span class="spinner-sm"></span> Posting</span>';
+  else if (status === 'posted') badge = `<span class="status-badge status-posted">\u2713 Posted${d.posted_at ? ' \u00b7 ' + new Date(d.posted_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : ''}</span>`;
+  else if (status === 'failed') badge = '<span class="status-badge status-failed">Failed</span>';
+
+  let actions = '';
+  if (status === 'posted') {
+    actions = `<a href="${esc(d.tweet_url)}" target="_blank" class="btn btn-ghost btn-sm" style="text-decoration:none">View on X</a>`;
+  } else if (status === 'failed') {
+    actions = `<button class="btn btn-sm" style="background:var(--red);color:#fff" onclick="retryPost('${esc(d.id)}')">Retry</button>
+      <button class="btn btn-ghost btn-sm" onclick="skip('${esc(d.id)}')">Dismiss</button>`;
+  } else if (status === 'posting') {
+    actions = '';
+  } else if (status === 'approved') {
+    actions = `<button class="btn btn-sm" style="background:var(--green-bg);color:var(--green)" onclick="unapprove('${esc(d.id)}')">\u2713 Approved <span style="opacity:0.5;margin-left:4px;font-weight:400">undo</span></button>`;
+  } else {
+    actions = `<button class="btn btn-approve btn-sm" onclick="approve('${esc(d.id)}')">Approve</button>
+      <button class="btn btn-ghost btn-sm" onclick="editDraft('${esc(d.id)}')">Edit</button>
+      <button class="btn btn-ghost btn-sm" onclick="skip('${esc(d.id)}')">Skip</button>`;
   }
 
-  $('app').innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h1 style="font-size:20px">Posted</h1>
-      <button class="btn btn-ghost btn-sm" onclick="screen='feed';render()">Back</button>
+  return `
+  <div class="draft-card ${cardClass}" id="d-${esc(d.id)}">
+    <div class="draft-header">
+      <div class="draft-author">
+        <div class="avatar" aria-hidden="true">${esc(initials)}</div>
+        <div>
+          <div class="author-name">${esc(d.author_name || 'Unknown')} <span class="author-handle">${esc(d.author_handle)}</span></div>
+          ${d.author_followers ? `<div class="author-followers">${esc(Number(d.author_followers).toLocaleString())} followers</div>` : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        ${badge}
+        ${typeLabel ? `<span class="type-tag ${typeClass}">${esc(typeLabel)}</span>` : ''}
+      </div>
     </div>
-    ${data.map(e => `
-      <div class="posted-item">
-        <a href="${e.tweet_url}" target="_blank">${e.author_handle}</a>
-        <span class="posted-time">${new Date(e.posted_at).toLocaleString()}</span>
-      </div>`).join('')}
-  `;
+    <div class="original-tweet">${esc(d.tweet_text)}</div>
+    <div class="draft-reply" id="reply-${esc(d.id)}">${esc(d.reply_text)}</div>
+    ${d.reasoning ? `<details style="margin-bottom:8px"><summary style="font-size:12px;color:var(--muted);cursor:pointer">Why this tweet</summary><div class="draft-meta" style="margin-top:4px">${esc(d.reasoning)}</div></details>` : ''}
+    <div class="draft-actions">${actions}</div>
+  </div>`;
 }
 
 // ── Actions ──
-async function approve(id) {
-  await api('PATCH', '/api/drafts/' + id, { status: 'approved' });
+function approveAll() {
+  const count = allDrafts.filter(d => d.status === 'pending').length;
+  for (const d of allDrafts) {
+    if (d.status === 'pending') d.status = 'approved';
+  }
+  if (typeof posthog !== 'undefined') posthog.capture('draft_approve_all', { count });
+  save(); render();
+}
+
+function approve(id) {
   const d = allDrafts.find(x => x.id === id);
   if (d) d.status = 'approved';
+  if (typeof posthog !== 'undefined') posthog.capture('draft_approved');
+  save(); render();
+}
+
+function unapprove(id) {
+  const d = allDrafts.find(x => x.id === id);
+  if (d) d.status = 'pending';
   save(); render();
 }
 
@@ -582,50 +817,105 @@ function editDraft(id) {
   const d = allDrafts.find(x => x.id === id);
   if (!d) return;
   const el = document.getElementById('reply-' + id);
-  el.innerHTML = `<textarea class="edit-area" id="ea-${id}" rows="3">${d.reply_text}</textarea>
+  if (!el) return;
+  el.innerHTML = `<textarea class="edit-area" id="ea-${esc(id)}" rows="3">${esc(d.reply_text)}</textarea>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="btn btn-approve btn-sm" onclick="saveEdit('${id}')">Save & approve</button>
+      <button class="btn btn-approve btn-sm" onclick="saveEdit('${esc(id)}')">Save & approve</button>
       <button class="btn btn-ghost btn-sm" onclick="render()">Cancel</button>
     </div>`;
-  document.getElementById('ea-' + id).focus();
+  const ta = document.getElementById('ea-' + id);
+  if (ta) ta.focus();
 }
 
-async function saveEdit(id) {
-  const text = document.getElementById('ea-' + id).value.trim();
+function saveEdit(id) {
+  const ta = document.getElementById('ea-' + id);
+  if (!ta) return;
+  const text = ta.value.trim();
   if (!text) return;
-  await api('PATCH', '/api/drafts/' + id, { reply_text: text, status: 'approved' });
   const d = allDrafts.find(x => x.id === id);
   if (d) { d.reply_text = text; d.status = 'approved'; }
-  render();
+  save(); render();
 }
 
-async function skip(id) {
-  await api('PATCH', '/api/drafts/' + id, { status: 'skipped' });
+function skip(id) {
   allDrafts = allDrafts.filter(x => x.id !== id);
-  save(); toast('Skipped');
-  render();
+  save(); toast('Skipped'); render();
+}
+
+// ── Posting ──
+function confirmPost() {
+  const approved = allDrafts.filter(d => d.status === 'approved');
+  if (!approved.length) return;
+  const bar = document.querySelector('.post-bar-inner');
+  if (!bar) return;
+  const est = approved.length * 30;
+  bar.innerHTML = `
+    <div style="font-size:13px;color:var(--ink);line-height:1.4">
+      Post <strong>${approved.length}</strong> ${approved.length === 1 ? 'reply' : 'replies'} to X?<br>
+      <span style="color:var(--muted)">~${est}s total</span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="render()">Cancel</button>
+      <button class="btn btn-sm" style="background:var(--accent);color:#fff" onclick="postAll()">Post now</button>
+    </div>
+  `;
 }
 
 async function postAll() {
   const approved = allDrafts.filter(d => d.status === 'approved');
   if (!approved.length) return;
+  const browserSid = sid || await ensureBrowser();
+  if (!browserSid) return toast('Browser needed');
 
-  const browserSid = sid || await ensureBrowser(() => {});
-  if (!browserSid) return toast('Browser needed to post');
+  postingInProgress = true;
+  for (const d of approved) d.status = 'posting';
+  save(); render();
 
-  const btn = $('post-all');
-  if (btn) btn.disabled = true;
-
+  let ok = 0, fail = 0;
   for (let i = 0; i < approved.length; i++) {
-    if (btn) btn.textContent = 'Posting ' + (i + 1) + '/' + approved.length + '...';
-    await api('POST', '/api/drafts/' + approved[i].id + '/post', { browser_session_id: browserSid });
-    approved[i].status = 'posted';
-    if (i < approved.length - 1) await new Promise(r => setTimeout(r, 60000));
+    const result = await api('POST', '/api/post', {
+      browser_session_id: browserSid,
+      tweet_url: approved[i].tweet_url,
+      reply_text: approved[i].reply_text,
+    });
+    if (result && result.result === 'complete') {
+      approved[i].status = 'posted';
+      approved[i].posted_at = new Date().toISOString();
+      ok++;
+    } else {
+      approved[i].status = 'failed';
+      fail++;
+    }
+    save(); render();
+    if (i < approved.length - 1) await new Promise(r => setTimeout(r, 15000));
   }
 
-  allDrafts = allDrafts.filter(d => d.status !== 'posted');
-  toast('Posted ' + approved.length + ' replies!');
+  postingInProgress = false;
+  save();
+  if (ok > 0 && fail === 0) toast(ok + (ok === 1 ? ' reply' : ' replies') + ' posted!');
+  else if (ok > 0) toast(ok + ' posted, ' + fail + ' failed');
+  else toast('Posting failed');
   render();
+}
+
+async function retryPost(id) {
+  const d = allDrafts.find(x => x.id === id);
+  if (!d) return;
+  const browserSid = sid || await ensureBrowser();
+  if (!browserSid) return toast('Browser needed');
+  d.status = 'posting';
+  save(); render();
+  const result = await api('POST', '/api/post', {
+    browser_session_id: browserSid,
+    tweet_url: d.tweet_url,
+    reply_text: d.reply_text,
+  });
+  if (result && result.result === 'complete') {
+    d.status = 'posted'; d.posted_at = new Date().toISOString(); toast('Posted!');
+  } else {
+    d.status = 'failed'; toast('Failed');
+  }
+  save(); render();
 }
 
 init();

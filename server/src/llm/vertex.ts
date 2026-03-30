@@ -155,9 +155,14 @@ function convertMessages(messages: Message[]): any[] {
         } else if (block.type === "tool_use") {
           const tu = block as ContentBlockToolUse;
           toolUseIdToName[tu.id] = tu.name;
-          parts.push({
-            functionCall: { name: tu.name, args: tu.input },
-          });
+          // If raw Gemini parts are available (with thought signatures), use them
+          if ((msg as any)._rawGeminiParts) {
+            // Raw parts already added below — skip individual conversion
+          } else {
+            parts.push({
+              functionCall: { name: tu.name, args: tu.input },
+            });
+          }
         } else if (block.type === "tool_result") {
           const tr = block as any;
           let responseText = tr.content;
@@ -188,7 +193,11 @@ function convertMessages(messages: Message[]): any[] {
       }
     }
 
-    if (parts.length > 0) {
+    // Gemini 3+: if raw parts with thought signatures are available, use them directly
+    // for the model turn (preserves thought_signature fields that Gemini 3 requires)
+    if (role === "model" && (msg as any)._rawGeminiParts) {
+      geminiMessages.push({ role, parts: (msg as any)._rawGeminiParts });
+    } else if (parts.length > 0) {
       geminiMessages.push({ role, parts });
     }
   }
@@ -262,6 +271,7 @@ async function parseGeminiStream(
   const toolCalls: Array<{ id: string; name: string; input: any }> = [];
   let stopReason = "end_turn";
   let usage = { input_tokens: 0, output_tokens: 0 };
+  let rawModelParts: any[] | null = null; // Gemini 3: preserve thought signatures
 
   try {
     while (true) {
@@ -292,6 +302,10 @@ async function parseGeminiStream(
         if (!candidate) continue;
 
         const parts = candidate.content?.parts || [];
+        // Capture raw parts for thought signature passthrough (Gemini 3+)
+        if (!rawModelParts) rawModelParts = [];
+        rawModelParts.push(...parts);
+
         for (const part of parts) {
           if (part.text) {
             currentText += part.text;
@@ -337,7 +351,7 @@ async function parseGeminiStream(
     stopReason = "tool_use";
   }
 
-  return { content, stop_reason: stopReason, usage };
+  return { content, stop_reason: stopReason, usage, _rawGeminiParts: rawModelParts || undefined };
 }
 
 // --- Main Call ---
@@ -358,7 +372,7 @@ export async function callVertexLLM(params: CallLLMParams): Promise<LLMResponse>
     messages,
     system,
     tools,
-    model = "gemini-2.5-flash",
+    model = "gemini-3-flash-preview",
     maxTokens = 16384,
     signal,
     onText,

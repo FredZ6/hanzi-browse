@@ -145,8 +145,12 @@ export async function runAgentLoop(
     totalUsage.outputTokens += response.usage?.output_tokens || 0;
     if (response.model) lastModel = response.model;
 
-    // Add assistant response to conversation
-    messages.push({ role: "assistant", content: response.content });
+    // Add assistant response to conversation (preserve raw Gemini parts for thought signatures)
+    const assistantMsg: any = { role: "assistant", content: response.content };
+    if ((response as any)._rawGeminiParts) {
+      assistantMsg._rawGeminiParts = (response as any)._rawGeminiParts;
+    }
+    messages.push(assistantMsg);
 
     // Extract text and tool calls
     const textBlocks = response.content.filter(
