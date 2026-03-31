@@ -608,13 +608,17 @@ async function ensureBrowser() {
         <button class="btn btn-ghost btn-sm" id="refresh-connection" style="margin-top:12px;width:100%" onclick="this.textContent='Checking...';this.disabled=true">I've completed pairing \u2014 check again</button>
       `;
       HanziConnect.mount('#hanzi-pair-widget', {
-        apiKey: 'hic_live_proxy',
+        apiKey: 'hic_pub_proxy', // proxied through our Express server — see /v1/browser-sessions routes
         apiUrl: BASE,
         purpose: 'search X and post replies on your behalf',
         onConnected: (sessionId) => {
           sid = sessionId;
           toast('Browser connected!');
           resolve(sid);
+        },
+        onDisconnected: () => {
+          sid = null;
+          toast('Browser disconnected — please reconnect');
         },
       });
       // Manual refresh button as fallback
