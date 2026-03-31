@@ -18,6 +18,7 @@ import express from "express";
 import { readFileSync, existsSync, appendFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { HanziClient } from '../../sdk/dist/index.js';
 
 // Disable proxy for all outbound fetch
 delete process.env.http_proxy;
@@ -57,6 +58,11 @@ const PORT = process.env.PORT || 3001;
 
 if (!HANZI_KEY) { console.error("Set HANZI_API_KEY"); process.exit(1); }
 
+const hanziClient = new HanziClient({
+  apiKey: HANZI_KEY,
+  baseUrl: HANZI_URL,
+});
+
 // Load X.com site patterns for browser tasks
 const xPatternPath = join(__dirname, "../../server/site-patterns/x.com.md");
 const X_SITE_PATTERN = existsSync(xPatternPath) ? readFileSync(xPatternPath, "utf-8") : "";
@@ -92,29 +98,6 @@ setInterval(() => {
     if (now - e.reset > 86400000) rateLimits.delete(ip);
   }
 }, 3600000);
-
-// ── Hanzi API (browser tool) ─────────────────────────────────
-
-async function hanzi(method, path, body) {
-  const res = await fetch(`${HANZI_URL}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${HANZI_KEY}` },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
-}
-
-async function pollTask(taskId, timeoutMs = 5 * 60 * 1000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 3000));
-    const s = await hanzi("GET", `/v1/tasks/${taskId}`);
-    if (s.status !== "running") return s;
-  }
-  return { id: taskId, status: "timeout" };
-}
 
 // ── Strategy AI (LLM calls) ──────────────────────────────────
 
@@ -163,23 +146,27 @@ app.get("/", (req, res) => {
 
 // Proxy for embed.js widget (avoids CORS)
 app.get("/v1/browser-sessions", async (req, res) => {
-  try { res.json(await hanzi("GET", "/v1/browser-sessions")); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  try {
+    const sessions = await hanziClient.listSessions();
+    res.json({ sessions });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.post("/v1/browser-sessions/pair", async (req, res) => {
   try {
-    const data = await hanzi("POST", "/v1/browser-sessions/pair", { label: "X Marketing" });
-    res.json(data);
+    const data = await hanziClient.createPairingToken();
+    res.json({ pairing_token: data.pairingToken, expires_at: data.expiresAt, expires_in_seconds: data.expiresInSeconds });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.get("/api/sessions", async (req, res) => {
-  try { res.json(await hanzi("GET", "/v1/browser-sessions")); }
-  catch (err) { res.status(500).json({ error: err.message }); }
+  try {
+    const sessions = await hanziClient.listSessions();
+    res.json({ sessions });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.post("/api/pair", async (req, res) => {
   try {
-    const data = await hanzi("POST", "/v1/browser-sessions/pair", { label: "X Marketing" });
-    res.json({ pairing_url: `${HANZI_URL}/pair/${data.pairing_token}` });
+    const data = await hanziClient.createPairingToken();
+    res.json({ pairing_url: `${HANZI_URL}/pair/${data.pairingToken}` });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -207,7 +194,7 @@ app.post("/api/cancel-search", async (req, res) => {
   const taskIds = activeSearchTasks.get(browser_session_id) || [];
   const cancelled = [];
   for (const taskId of taskIds) {
-    try { await hanzi("POST", `/v1/tasks/${taskId}/cancel`); cancelled.push(taskId); } catch {}
+    try { await hanziClient.cancelTask(taskId); cancelled.push(taskId); } catch {}
   }
   activeSearchTasks.delete(browser_session_id);
   console.log(`[Browser] Cancelled ${cancelled.length} tasks`);
@@ -223,8 +210,8 @@ app.post("/api/search-one", async (req, res) => {
     if (!browser_session_id || !keyword) return res.status(400).json({ error: "browser_session_id and keyword required" });
 
     console.log(`[Browser] Searching keyword: "${keyword}"`);
-    const task = await hanzi("POST", "/v1/tasks", {
-      browser_session_id,
+    const task = await hanziClient.createTask({
+      browserSessionId: browser_session_id,
       task: `${X_SITE_PATTERN ? "<site_pattern>\n" + X_SITE_PATTERN + "\n</site_pattern>\n\n" : ""}Open a new tab. Go to https://x.com/search?q=${encodeURIComponent(keyword)}&src=typed_query&f=live
 
 IMPORTANT RULES:
@@ -253,7 +240,16 @@ List ALL tweets as a numbered list.`,
 
     activeSearchTasks.set(browser_session_id, [...(activeSearchTasks.get(browser_session_id) || []), task.id]);
     console.log(`[Browser] Keyword "${keyword}" → task ${task.id}`);
-    const result = await pollTask(task.id, 10 * 60 * 1000);
+
+    // Poll manually so we can track the task ID for cancellation
+    const deadline = Date.now() + 10 * 60 * 1000;
+    let result = task;
+    while (Date.now() < deadline && result.status === "running") {
+      await new Promise(r => setTimeout(r, 3000));
+      result = await hanziClient.getTask(task.id);
+    }
+    if (result.status === "running") result = { ...result, status: "timeout" };
+
     console.log(`[Browser] Keyword "${keyword}" → ${result.status} (${result.steps} steps)`);
     track("search_keyword", { keyword, status: result.status, steps: result.steps }, req.ip);
     res.json({ keyword, answer: result.answer, status: result.status, steps: result.steps });
@@ -363,8 +359,8 @@ app.post("/api/read-url", async (req, res) => {
     if (!browser_session_id || !url) return res.status(400).json({ error: "browser_session_id and url required" });
 
     console.log(`[Browser] Reading ${url}...`);
-    const task = await hanzi("POST", "/v1/tasks", {
-      browser_session_id,
+    const result = await hanziClient.runTask({
+      browserSessionId: browser_session_id,
       task: `Open a new tab and go to ${url}
 
 Read the page and extract:
@@ -376,9 +372,8 @@ Read the page and extract:
 - Key differentiators
 
 Return a structured summary. Be thorough — read the full page, scroll down.`,
-    });
+    }, { timeoutMs: 10 * 60 * 1000 });
 
-    const result = await pollTask(task.id, 10 * 60 * 1000);
     if (result.status !== "complete") {
       return res.status(500).json({ error: `Failed to read URL: ${result.status}` });
     }
@@ -500,8 +495,8 @@ app.post("/api/post", async (req, res) => {
 
     console.log(`[Browser] Posting reply to ${tweet_url}...`);
 
-    const task = await hanzi("POST", "/v1/tasks", {
-      browser_session_id,
+    const result = await hanziClient.runTask({
+      browserSessionId: browser_session_id,
       task: `Open a new tab and navigate to this tweet: ${tweet_url}
 
 YOUR ONLY JOB: Insert the reply text and click Reply. Nothing else. Do NOT navigate away.
@@ -527,9 +522,7 @@ RULES:
 - Do NOT press Escape, do NOT navigate back, do NOT close any modals
 - Do NOT scroll down looking for anything — the reply area is where you opened it
 - Maximum 12 tool calls for this task. If you haven't posted by step 12, stop.`,
-    });
-
-    const result = await pollTask(task.id, 2 * 60 * 1000);
+    }, { timeoutMs: 2 * 60 * 1000 });
     console.log(`[Browser] Post result: ${result.status}`);
     track("reply_posted", { status: result.status, tweet_url }, req.ip);
     res.json({ result: result.status });
