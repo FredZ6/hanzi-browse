@@ -35,6 +35,8 @@ export interface TaskCreateParams {
   task: string;
   url?: string;
   context?: string;
+  /** URL to receive a POST when the task completes or fails. */
+  webhookUrl?: string;
 }
 
 export interface TaskRun {
@@ -165,6 +167,7 @@ export class HanziClient {
       task: params.task,
       url: params.url,
       context: params.context,
+      webhook_url: params.webhookUrl,
     });
     return this.normalizeTask(data);
   }
