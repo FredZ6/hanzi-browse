@@ -1,45 +1,51 @@
-# Hanzi Browse — MCP Server
+# Hanzi Browse
 
-The MCP server exposes browser tools to MCP clients and forwards browser work to
-the Chrome extension over the local WebSocket relay.
+Give your AI agent a real browser — with your existing logins, cookies, and sessions.
 
-## Setup
+**Two ways to use it:**
+- **Use locally** — MCP server for Claude Code, Cursor, Codex, and other AI coding agents
+- **Build with it** — REST API + TypeScript SDK for embedding browser automation in your product
+
+## Quick Start (MCP)
 
 ```bash
-cd mcp-server
-npm install
-npm run build
+npx hanzi-browse setup
 ```
 
-Add to your MCP config (e.g., `~/.claude/claude_desktop_config.json`):
+This installs the Chrome extension and configures your AI agent. One command, done.
 
-```json
-{
-  "mcpServers": {
-    "browser": {
-      "command": "node",
-      "args": ["/path/to/hanzi-browse/mcp-server/dist/index.js"]
-    }
-  }
-}
+**Prerequisites:** Chrome must be open with the [Hanzi extension](https://chromewebstore.google.com/detail/hanzi-browse/iklpkemlmbhemkiojndpbhoakgikpmcd) installed.
+
+## Quick Start (API)
+
+```bash
+npm install @hanzi/browser-agent
 ```
 
-**Prerequisites:** The Chrome extension must be installed and running. See the [main README](../README.md) for full setup.
+```typescript
+import { HanziClient } from '@hanzi/browser-agent';
 
-## How It Works
+const client = new HanziClient({ apiKey: 'hic_live_...' });
 
-```text
-MCP client
-  -> mcp-server (stdio)
-  -> relay (WebSocket)
-  -> Chrome extension
-  -> browser agent
+// 1. Pair a browser — give the URL to your user
+const { pairingToken } = await client.createPairingToken();
+// User visits: https://api.hanzilla.co/pair/{pairingToken}
+
+// 2. Find their connected session
+const sessions = await client.listSessions();
+const browser = sessions.find(s => s.status === 'connected');
+
+// 3. Run a task (polls until complete)
+const result = await client.runTask({
+  browserSessionId: browser.id,
+  task: 'Go to example.com and read the page title',
+});
+console.log(result.answer);
 ```
 
-The extension is the browser executor. The MCP server should only manage MCP
-tool calls, local session bookkeeping, and blocking waits for completion.
+Full API docs: [browse.hanzilla.co/docs.html](https://browse.hanzilla.co/docs.html)
 
-## Tools
+## MCP Tools
 
 ### `browser_start`
 
@@ -55,7 +61,6 @@ browser_start(
 → {
   "session_id": "abc123",
   "status": "complete",
-  "task": "Search for flights to Tokyo...",
   "answer": "Found 3 flights: JAL $850, ANA $920, United $780",
   "total_steps": 8,
   "recent_steps": ["Opened Google Flights", "Set destination to Tokyo", ...]
@@ -64,7 +69,7 @@ browser_start(
 
 ### `browser_message`
 
-Send follow-up instructions to an existing session. Also blocks until the agent finishes.
+Send follow-up instructions to an existing session.
 
 ```
 browser_message(session_id: "abc123", message: "Book the cheapest one")
@@ -75,7 +80,7 @@ browser_message(session_id: "abc123", message: "Book the cheapest one")
 Check known sessions and their latest status.
 
 ```
-browser_status()                    // all active sessions
+browser_status()                     // all active sessions
 browser_status(session_id: "abc123") // specific session
 ```
 
@@ -85,7 +90,7 @@ Stop a task.
 
 ```
 browser_stop(session_id: "abc123")
-browser_stop(session_id: "abc123", remove: true)  // also delete session
+browser_stop(session_id: "abc123", remove: true)  // also close window
 ```
 
 ### `browser_screenshot`
@@ -98,84 +103,63 @@ browser_screenshot(session_id: "abc123")
 
 ## Examples
 
-**Research:**
-```
-browser_start("Find the top 3 competitors for Acme Corp and summarize their pricing")
-```
-
 **Logged-in workflows:**
 ```
-browser_start("Go to Jira, find my open tickets, and summarize what needs attention this week")
+browser_start("Go to Jira, find my open tickets, and summarize what needs attention")
 ```
 
 **Multi-turn:**
 ```
 s = browser_start("Go to LinkedIn and find AI Engineer jobs in Montreal")
-→ { session_id: "x1", answer: "Found: Applied AI Engineer at Cohere" }
-
-browser_message("x1", "Click into that job and tell me the requirements")
-→ { answer: "Requirements: 3+ years Python, ML experience..." }
-
-browser_message("x1", "Apply to this job using my profile")
-→ { answer: "Application submitted successfully" }
+browser_message(s.session_id, "Click into the Cohere job and tell me the requirements")
+browser_message(s.session_id, "Apply to this job using my profile")
 ```
 
 **Parallel execution:**
 ```
 browser_start("Check flight prices to Tokyo")
 browser_start("Check hotel prices in Shibuya")
-browser_start("Look up train pass costs")
-// All three run simultaneously
+// Both run simultaneously in separate windows
 ```
 
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---|---|---|
-| `HANZI_IN_CHROME_MAX_SESSIONS` | `5` | Max concurrent browser tasks |
+| `HANZI_BROWSE_MAX_SESSIONS` | `5` | Max concurrent browser tasks |
+| `HANZI_BROWSE_TIMEOUT_MS` | `300000` | Task timeout (ms) |
 | `WS_RELAY_PORT` | `7862` | WebSocket relay port |
 
-## Architecture
+## Skills
 
-```
-AI Tool (Claude Code, Cursor, etc.)
-    ↓ MCP Protocol (stdio)
-MCP Server
-    ↓ WebSocket
-Relay Server
-    ↓ WebSocket
-Chrome Extension
-    ↓ Extension agent loop
-Target Website
-```
-
-The relay server starts automatically when the MCP server connects. It routes
-messages between the MCP server and the Chrome extension and briefly queues
-messages while the extension service worker is asleep.
-
-> **Principle**: Hanzi is for real browser work in your signed-in Chrome.
-> Agents should prefer code, logs, APIs, and existing tools first. Use Hanzi when the job needs a real browser session.
-
-## Prompts
-
-The server exposes MCP prompts that clients auto-discover as slash commands:
+The server exposes MCP prompts that clients auto-discover:
 
 | Prompt | Description |
 |--------|-------------|
-| `linkedin-prospector` | Goal-driven LinkedIn outreach — networking, sales, partnerships, or hiring |
-| `e2e-tester` | Test your app in a real browser — reports bugs with screenshots and code references |
-| `social-poster` | Post across LinkedIn, Twitter, Reddit, HN — drafts per-platform, posts from your browser |
-
-In Claude Code, use the built-in `linkedin-prospector` prompt from the MCP prompt list.
-
-## Skills CLI
+| `linkedin-prospector` | Goal-driven LinkedIn outreach |
+| `e2e-tester` | Test your app in a real browser with screenshots |
+| `social-poster` | Post across LinkedIn, Twitter, Reddit from your browser |
+| `x-marketer` | Find X/Twitter conversations and draft voice-matched replies |
 
 ```bash
 hanzi-browser skills                              # list available skills
 hanzi-browser skills install linkedin-prospector   # install SKILL.md to your project
 ```
 
-Skills are portable SKILL.md files for agents that don't support MCP prompts (Cline, Codex). Each skill follows the same principle: use existing tools first, Hanzi only for real browser steps.
+## Architecture
+
+```
+AI Agent (Claude Code, Cursor, etc.)
+    ↓ MCP Protocol (stdio)
+MCP Server (this package)
+    ↓ WebSocket
+Chrome Extension
+    ↓ Chrome DevTools Protocol
+User's Real Browser
+```
+
+> **Principle**: Hanzi is for real browser work in your signed-in Chrome.
+> Agents should prefer code, logs, APIs, and existing tools first. Use Hanzi when the job needs a real browser session.
 
 ## License
 

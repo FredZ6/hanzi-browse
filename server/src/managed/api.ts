@@ -1058,6 +1058,7 @@ function parseBody(req: IncomingMessage): Promise<any> {
 const ALLOWED_ORIGINS = [
   "https://browse.hanzilla.co",
   "https://api.hanzilla.co",
+  "https://tools.hanzilla.co",
   ...(process.env.NODE_ENV === "production" ? [] : [
     "http://localhost:3000",
     "http://localhost:5173", // Vite dev server
@@ -1206,11 +1207,7 @@ async function handleRequest(
     if (method === "GET" && url === "/v1/me") {
       let profile = await resolveSessionProfile(req);
       if (!profile) {
-        // Debug: try reading session directly from cookie + DB
-        const cookieHeader = req.headers.cookie || '';
-        const tokenMatch = cookieHeader.match(/better-auth[.\-]session_token=([^;.\s]+)/);
-        const rawToken = tokenMatch ? decodeURIComponent(tokenMatch[1]) : null;
-        sendJson(req, res, 401, { error: "Not signed in", debug: { rawToken: rawToken?.substring(0, 10), cookieHeader: cookieHeader.substring(0, 100) } });
+        sendJson(req, res, 401, { error: "Not signed in" });
         return;
       }
       sendJson(req, res, 200, {
@@ -1482,8 +1479,8 @@ async function handleRequest(
 
     sendJson(req, res, 404, { error: "Not found" });
   } catch (err: any) {
-    log.error("Request error", { requestId }, { method, url, error: err.message });
-    sendJson(req, res, 500, { error: err.message, request_id: requestId });
+    log.error("Request error", { requestId }, { method, url, error: err.message, stack: err.stack });
+    sendJson(req, res, 500, { error: "Internal server error", request_id: requestId });
   }
 }
 

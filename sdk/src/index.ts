@@ -124,7 +124,15 @@ export class HanziClient {
       body: body ? JSON.stringify(body) : undefined,
     });
 
-    const data = await res.json();
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      throw new HanziError(
+        `HTTP ${res.status} (non-JSON response)`,
+        res.status
+      );
+    }
 
     if (!res.ok) {
       throw new HanziError(
@@ -239,11 +247,19 @@ export class HanziClient {
 
     const task = await this.createTask(params);
 
+    let consecutiveErrors = 0;
     while (Date.now() < deadline) {
       await sleep(pollInterval);
-      const current = await this.getTask(task.id);
-      if (current.status !== "running") {
-        return current;
+      try {
+        const current = await this.getTask(task.id);
+        consecutiveErrors = 0;
+        if (current.status !== "running") {
+          return current;
+        }
+      } catch (err) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= 3) throw err; // persistent failure, give up
+        // transient error — retry on next poll
       }
     }
 
@@ -257,9 +273,9 @@ export class HanziClient {
   // --- API Keys ---
 
   /** Create a new API key. Returns the full key — store it, it won't be shown again. */
-  async createApiKey(name?: string): Promise<{ id: string; key: string; name: string }> {
-    const data = await this.request("POST", "/v1/api-keys", { name });
-    return { id: data.id, key: data.key, name: data.name };
+  async createApiKey(name: string, type?: "secret" | "publishable"): Promise<{ id: string; key: string; name: string; type: string }> {
+    const data = await this.request("POST", "/v1/api-keys", { name, type });
+    return { id: data.id, key: data.key, name: data.name, type: data.type };
   }
 
   /** List all API keys for your workspace. Keys are shown as prefixes only. */

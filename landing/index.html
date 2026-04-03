@@ -1005,12 +1005,17 @@ const client = new HanziClient({
   apiKey: process.env.HANZI_API_KEY,
 });
 
-// Pair a browser
+// Pair a browser — give the URL to your user
 const { pairingToken } = await client.createPairingToken();
+// User visits: https://api.hanzilla.co/pair/{pairingToken}
+
+// Find their connected session
+const sessions = await client.listSessions();
+const browser = sessions.find(s =&gt; s.status === 'connected');
 
 // Run a task
 const result = await client.runTask({
-  browserSessionId: 'bsn_...',
+  browserSessionId: browser.id,
   task: 'Read the patient chart on this page',
 });
 

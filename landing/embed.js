@@ -9,8 +9,9 @@
  *   <div id="hanzi-connect"></div>
  *   <script>
  *     HanziConnect.mount('#hanzi-connect', {
- *       apiKey: 'hic_live_...',
+ *       apiKey: 'hic_pub_...',       // publishable key (safe for client-side)
  *       onConnected: (sessionId) => { ... },
+ *       onError: (error) => { ... },  // optional error callback
  *       purpose: 'search X on your behalf',
  *     });
  *   </script>
@@ -190,11 +191,16 @@
   class HanziConnectWidget {
     constructor(container, options) {
       this.container = typeof container === 'string' ? document.querySelector(container) : container;
+      if (!this.container) throw new Error('HanziConnect: element not found: ' + container);
       this.apiKey = options.apiKey;
+      if (this.apiKey && this.apiKey.startsWith('hic_live_')) {
+        console.warn('HanziConnect: You are using a secret API key (hic_live_...) in client-side code. Use a publishable key (hic_pub_...) instead.');
+      }
       this.apiUrl = options.apiUrl !== undefined ? options.apiUrl : API_URL;
       this.purpose = options.purpose || 'automate browser tasks on your behalf';
       this.onConnected = options.onConnected || (() => {});
       this.onDisconnected = options.onDisconnected || (() => {});
+      this.onError = options.onError || (() => {});
       this.theme = options.theme || 'light';
 
       this.sessionId = null;
@@ -282,7 +288,9 @@
           this.startHeartbeat();
           return;
         }
-      } catch {}
+      } catch (err) {
+        this.onError('Failed to check sessions: ' + (err.message || err));
+      }
 
       this.state = 'pair';
       this.render();
@@ -299,6 +307,7 @@
         });
 
         if (!data.pairing_token) {
+          this.onError('Failed to create pairing token: ' + (data.error || 'unknown error'));
           this.state = 'pair';
           this.render();
           return;
@@ -311,9 +320,11 @@
         window.open(pairingUrl, '_blank');
 
         // Poll for connection
+        let pollErrors = 0;
         this.pollInterval = setInterval(async () => {
           try {
             const sessions = await this.api('GET', '/v1/browser-sessions');
+            pollErrors = 0;
             const connected = (sessions.sessions || []).find(s => s.status === 'connected');
             if (connected) {
               clearInterval(this.pollInterval);
@@ -324,7 +335,16 @@
               this.onConnected(this.sessionId);
               this.startHeartbeat();
             }
-          } catch {}
+          } catch (err) {
+            pollErrors++;
+            if (pollErrors >= 3) {
+              clearInterval(this.pollInterval);
+              this.pollInterval = null;
+              this.onError('Lost connection while pairing: ' + (err.message || err));
+              this.state = 'pair';
+              this.render();
+            }
+          }
         }, 2000);
 
         // Timeout after 3 minutes
@@ -332,11 +352,13 @@
           if (this.pollInterval) {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
+            this.onError('Pairing timed out. Click "Connect browser" to try again.');
             this.state = 'pair';
             this.render();
           }
         }, 180000);
-      } catch {
+      } catch (err) {
+        this.onError('Pairing failed: ' + (err.message || err));
         this.state = 'pair';
         this.render();
       }
@@ -411,19 +433,29 @@
 
     startHeartbeat() {
       if (this.heartbeatInterval) return;
+      let heartbeatErrors = 0;
       this.heartbeatInterval = setInterval(async () => {
         try {
           const data = await this.api('GET', '/v1/browser-sessions');
+          heartbeatErrors = 0;
           const session = (data.sessions || []).find(s => s.id === this.sessionId);
           if (!session || session.status !== 'connected') {
             clearInterval(this.heartbeatInterval);
             this.heartbeatInterval = null;
+            const oldId = this.sessionId;
             this.sessionId = null;
             this.state = 'pair';
             this.render();
-            this.onDisconnected(this.sessionId);
+            this.onDisconnected(oldId);
           }
-        } catch {}
+        } catch {
+          heartbeatErrors++;
+          if (heartbeatErrors >= 3) {
+            // Network down — stop polling but don't disconnect (may recover)
+            clearInterval(this.heartbeatInterval);
+            this.heartbeatInterval = null;
+          }
+        }
       }, 15000);
     }
 
@@ -440,6 +472,9 @@
 
   window.HanziConnect = {
     mount(selector, options) {
+      if (!options || !options.apiKey) {
+        throw new Error('HanziConnect.mount: options.apiKey is required');
+      }
       return new HanziConnectWidget(selector, options);
     },
   };
