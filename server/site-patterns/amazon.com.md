@@ -7,8 +7,9 @@
 ## Validation Scope
 
 - Verified against the Amazon search results page for a household product query.
+- Verified one real Amazon product page opened from the search results.
 - Confirmed visible result-card structure, inline merchandising, location prompt behavior, and top-of-page sponsored modules.
-- Product-page, variant-selection, and cart flows still need deeper validation before they should be documented as verified procedures.
+- Variant-selection and cart flows still need deeper validation before they should be documented as verified procedures.
 
 ## Effective Patterns
 
@@ -33,8 +34,17 @@
 
 ## Notes For Future Validation
 
-- Verify whether product pages consistently expose seller, shipping, and review summary in predictable locations.
 - Verify whether variant selection is required before cart actions on common household products.
 - Verify how region and shipping destination changes affect availability text.
+
+## Verified Product Page Example
+
+- Title was visible near the top of the page and included roll count and sheet count.
+- Price was visible with a per-100-sheets unit-price breakdown.
+- Rating and review count were clearly displayed on the product page.
+- Availability was shown as `In Stock`.
+- Shipping and delivery messaging included destination-specific charges and an estimated arrival date.
+- Seller information was visible as `Amazon.com`.
+- No blockers were encountered during this product-page observation.
 
 ---

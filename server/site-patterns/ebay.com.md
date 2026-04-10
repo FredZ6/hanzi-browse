@@ -8,6 +8,7 @@
 
 - Verified against an eBay search results page for a household product query.
 - Confirmed repeated result-card layout, subtle sponsored labeling, shipping/location messaging, and pricing complexity.
+- A later validation attempt reached a product-page flow but did not produce a stable final extraction of title/price/shipping details.
 - Product-page and cart behavior still need additional validation before being treated as verified.
 
 ## Effective Patterns
@@ -33,6 +34,7 @@
 
 ## Notes For Future Validation
 
+- A direct product-page validation should be rerun from a known eBay item URL rather than asking the agent to choose a listing from search results.
 - Verify how listing pages surface seller details, returns, and shipping estimates.
 - Verify the add-to-cart path on fixed-price listings versus auction-style or `Best Offer` listings.
 - Verify whether filters meaningfully change result quality for common product research tasks.

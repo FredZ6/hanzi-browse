@@ -68,8 +68,8 @@
     "skill": "eBay UI patterns:\n- Search results usually show title, condition, price, shipping, and location directly on the card\n- Headline price is often incomplete until you also check shipping cost, coupon text, and 'Best Offer' language\n- Sponsored placements and featured carousels can interrupt the organic result list\n- Use condition and shipping origin early to filter out weak matches\n- Be cautious with range prices and urgency labels like 'Last one' or watcher counts; they do not guarantee a clean fixed-price purchase path"
   },
   {
-    "domain": "walmart.com",
-    "skill": "Walmart UI patterns:\n- Search results often expose enough information to compare products before opening a product page\n- Cards commonly include brand, title, stacked price, ratings, fulfillment messaging, and inline Add buttons\n- Sponsored hero modules can dominate the top of the results page, so do not assume the first visible item is the best organic result\n- Fulfillment context depends on pickup or delivery location banners, which can change what is shown\n- Treat Rollback, discount messaging, and unit pricing as separate signals and verify them individually"
+    "domain": "walmart.ca",
+    "skill": "Walmart.ca UI patterns:\n- Search results often expose enough information to compare products before opening a product page\n- Cards commonly include brand, title, price, ratings, fulfillment messaging, and promo details such as Subscribe to Save or pickup thresholds\n- Walmart.com may first present a storefront or region-selection step and later a human-verification blocker; validation was more reliable on Walmart.ca\n- On Walmart.ca product pages, verify one-time price separately from Subscribe to Save pricing and check pickup, express delivery, and standard delivery messages individually\n- Treat promo labels, fulfillment thresholds, and returns messaging as separate signals and verify them individually"
   },
   {
     "domain": "target.com",
