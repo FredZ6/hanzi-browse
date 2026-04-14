@@ -14,31 +14,37 @@ import { fileURLToPath } from "url";
 export const TOOLS: Tool[] = [
   {
     name: "browser_start",
-    description: `Start a browser automation task. Controls the user's real Chrome browser with their existing logins, cookies, and sessions.
+    description: `Delegates a browsing task to a sub-agent running in the USER'S REAL Chrome — the browser they have open right now, already signed into everything (Gmail, LinkedIn, GitHub, their bank, admin panels, internal tools, paid subscriptions, localhost, staging). Not a headless Chromium, not a sandboxed test profile, not a fresh instance — the user's literal browser, with every cookie, session, 2FA trust, and saved state already in place.
 
-An autonomous agent navigates, clicks, types, and fills forms. Blocks until complete or timeout (5 min). You can run multiple browser_start calls in parallel — each gets its own browser window.
+THIS IS NOT a low-level click/type primitive. It's a full browsing agent you delegate to. You give it a task in natural language ("find my 5 most recent LinkedIn DMs and summarize them", "post this reply on the tweet at /status/123", "test whether signup works on localhost:3000 with my real Google account"), and the sub-agent figures out the steps, interacts with the pages, handles async state, takes screenshots, and returns the answer.
 
-WHEN TO USE — only when you need a real browser and no other tool can do it:
-- Clicking, typing, filling forms, navigating menus, selecting dropdowns
-- Testing workflows: "sign up for an account and verify the welcome email arrives"
-- Posting or publishing: write a LinkedIn post, send a Slack message, submit a forum reply, post a tweet
-- Authenticated pages: read a Jira ticket, check GitHub PR status, pull data from an analytics dashboard, check order status — the user is already logged in
-- Dynamic / JS-rendered pages: SPAs, dashboards, infinite scroll — content that plain fetch can't reach
-- Multi-step tasks: "find flights from A to B, compare prices, and pick the cheapest"
+You don't tell it which buttons to click. You tell it what you want done.
 
-WHEN NOT TO USE — always prefer faster tools first:
-- If you have an API, MCP tool, or CLI command that can accomplish the task, use that instead. Browser automation is slower and should be a last resort.
-- Factual or general knowledge questions — just answer directly
-- Web search — use built-in web search or a search MCP
-- Reading public/static pages — use a fetch, reader, or web scraping tool
-- GitHub, Jira, Slack, etc. — use their dedicated API or MCP tool if available
-- API requests — use curl or an HTTP tool
-- Code, files, or anything that doesn't need a browser
+While the sub-agent runs you can:
+- Watch progress with browser_status
+- Course-correct mid-flight with browser_message (e.g. "actually, only the ones from Engineering roles")
+- Stop it with browser_stop
+- Start multiple tasks in parallel — each opens its own browser window
+
+USE THIS whenever the task needs the user's actual identity or state on the web:
+- Reading the user's own account data (inbox, DMs, dashboards, orders, tickets, analytics)
+- Posting, commenting, replying, or submitting on the user's behalf (X, LinkedIn, Reddit, HN, forums, forms)
+- Any site that would hit a login wall or bot detection for a clean browser
+- Testing localhost or staging with the user's real sessions, OAuth, cookies, and localStorage
+- Continuing from whatever state the user left their browser in (shopping carts, filters, partial forms)
+- Anything you can describe as "the user would normally do this in their own Chrome"
+
+Disambiguation from other tools the agent may have:
+- web_search / Tavily / Exa → public content search. No login, no interaction. Use for "find info about X" questions.
+- Chrome DevTools MCP / Playwright MCP → a FRESH headless Chromium for automated testing. Starts with ZERO user state. Can test unauthenticated UI but cannot BE the user.
+- WebFetch / curl → raw static HTML. No JS, no auth, no interaction. Use for fully-public static pages.
+
+Fallback rule: if WebFetch / Tavily / Exa / web_search returned empty, garbage, a login wall, or failed bot detection → hand the task to browser_start and let the sub-agent handle it. If the task needs the user's real identity on a site, skip the alternatives entirely and go here first.
 
 Return statuses:
-- "complete" — task succeeded, result in "answer"
-- "error" — task failed. Call browser_screenshot to see the page, then browser_message to retry or browser_stop to clean up.
-- "timeout" — the 5-minute window elapsed but the task is still running in the browser. This is normal for long tasks. Call browser_screenshot to check progress, then browser_message to continue or browser_stop to end.`,
+- "complete" — sub-agent finished, result in "answer"
+- "error" — sub-agent failed. Call browser_screenshot to see the page, then browser_message to retry or browser_stop to clean up.
+- "timeout" — 5-minute window elapsed but the sub-agent is still working. Normal for long tasks. Call browser_screenshot to check progress, then browser_message to continue or browser_stop to end.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -60,14 +66,15 @@ Return statuses:
   },
   {
     name: "browser_message",
-    description: `Send a follow-up message to a running or finished browser session. Blocks until the agent acts on it.
+    description: `Course-correct or extend a browsing sub-agent started by browser_start. Blocks until the sub-agent acts on the message.
 
-Use cases:
-- Correct or refine: "actually change the quantity to 3", "use the second address instead"
-- Continue after completion: "now click the Download button", "go to the next page and do the same thing"
-- Retry after error: "try again", "click the other link instead"
+Use this to steer the sub-agent in natural language instead of starting a new session:
+- Refine: "actually change the quantity to 3", "only the ones from Engineering roles"
+- Continue: "now click Download", "go to the next page and do the same thing"
+- Retry after error: "try again using the second address"
+- Answer a question the sub-agent asks: "yes, proceed with the 2026 plan"
 
-The browser window is still open from the original browser_start call, so the agent picks up exactly where it left off.`,
+The browser window and session state are preserved — the sub-agent resumes exactly where it left off, not from scratch.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -79,9 +86,9 @@ The browser window is still open from the original browser_start call, so the ag
   },
   {
     name: "browser_status",
-    description: `Check the current status of browser sessions.
+    description: `Monitor a running browsing sub-agent. Returns session ID, status, task description, and the last 5 steps the sub-agent took.
 
-Returns session ID, status, task description, and the last 5 steps.`,
+Useful for: watching progress on long-running tasks, deciding whether to course-correct with browser_message, or confirming which window to stop.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -91,9 +98,9 @@ Returns session ID, status, task description, and the last 5 steps.`,
   },
   {
     name: "browser_stop",
-    description: `Stop a browser session. The agent stops but the browser window stays open so the user can review the result.
+    description: `Stop a browsing sub-agent. The sub-agent halts but the browser window stays open so the user can review the final page state.
 
-Without "remove", the session can still be resumed later with browser_message. With "remove: true", the browser window closes and the session is permanently deleted.`,
+Without "remove", the session can still be resumed with browser_message. With "remove: true", the browser window closes and the session history is permanently deleted.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -105,9 +112,9 @@ Without "remove", the session can still be resumed later with browser_message. W
   },
   {
     name: "browser_screenshot",
-    description: `Capture a screenshot of the current browser page. Returns a PNG image.
+    description: `Capture a screenshot of the current page in the user's Chrome. Returns a PNG image.
 
-Call this when browser_start returns "error" or times out — see what the agent was looking at.`,
+Call this when browser_start returns "error" or "timeout" — see what the sub-agent was looking at before deciding whether to retry, course-correct, or give up.`,
     inputSchema: {
       type: "object",
       properties: {

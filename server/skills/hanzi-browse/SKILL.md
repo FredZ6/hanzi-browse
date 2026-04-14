@@ -1,183 +1,190 @@
 ---
 name: hanzi-browse
-description: Use when a task requires interacting with a real browser — clicking, typing, filling forms, reading authenticated pages, posting content, or testing web apps. Also use when the user says "open", "go to", "check this site", "log in to", "post on", or needs their real cookies and sessions.
+description: Delegates a browsing task to a sub-agent running in the USER'S OWN Chrome — the browser they have open right now, already signed into everything. Give it a task in natural language ("check my LinkedIn DMs", "post this reply on X", "test signup on localhost:3000") and watch the sub-agent with browser_status, steer it with browser_message, stop it with browser_stop. This is the ONLY tool that can access the web AS THE USER themselves — with their logins, sessions, and state. Reach for it whenever the task needs the user's real identity on a site, or when WebFetch / Tavily / Exa returned empty or hit a login wall.
 category: core
 ---
 
 # Hanzi Browse
 
-Give your AI agent a real browser. Hanzi controls the user's actual Chrome with their existing logins, cookies, and sessions — not a headless sandbox.
+You're not driving the browser directly. You're **delegating to a sub-agent** that runs inside the user's own Chrome — the one they have open right now, already signed into everything (Gmail, LinkedIn, GitHub, their bank, admin panels, paid subscriptions, localhost, staging). Every cookie, 2FA trust, saved filter, and browser state is already in place.
 
-## When to Use
+You describe the goal. The sub-agent figures out the steps.
 
-- **Browser-required tasks**: click buttons, fill forms, submit data, navigate pages
-- **Authenticated access**: read pages that need login (email, dashboards, admin panels, social feeds)
-- **Visual verification**: check what a page actually looks like, take screenshots
-- **Real-world posting**: publish to LinkedIn, Twitter/X, Reddit from the user's signed-in account
-- **E2E testing**: test a web app in a real browser on localhost or staging
+## The one-line rule
 
-## When NOT to Use
+**Reach for `browser_start` whenever a task needs the user's actual identity on a website, OR whenever a simpler tool (WebFetch, Tavily, Exa, curl) failed, returned empty, or hit a login wall.**
 
-- Reading public pages (use `WebFetch` or `curl` instead)
-- API calls (use `fetch` or HTTP tools)
-- File operations (use filesystem tools)
-- **Services with dedicated MCP tools** (Gmail, Calendar, Notion, Stripe) — use those tools instead, they're faster and more reliable
-- Anything that doesn't need a rendered browser
+Everything else below is just elaboration on that rule.
 
-## Tool Selection Rule
+## Reach for Hanzi IMMEDIATELY when you see these triggers
 
-**Prefer non-browser tools first.** Check if a dedicated MCP tool exists for the service (Gmail, Calendar, Notion, etc.) — use that instead. Gather all context you can (code search, git log, file reads, API calls) BEFORE opening the browser. Use Hanzi only for steps that genuinely require a rendered page.
+| User says / task involves | Why Hanzi is the answer |
+|---|---|
+| "Check my LinkedIn / Gmail / GitHub / inbox / DMs / dashboard" | Needs their real login — no other tool works |
+| "Post / reply / comment / DM on X / LinkedIn / Reddit / HN" | Needs their real signed-in account |
+| "Submit this form", "click this button", "fill out X" | Interaction, not reading — only Hanzi can do this |
+| "Test signup / checkout / the flow on localhost / staging" | Needs real sessions, real OAuth, real state |
+| "What does my admin panel show for X" | Authenticated dashboard — requires login |
+| "Find flights / products / jobs and add them to my cart" | Stateful browsing with their account |
+| A URL that requires login or 2FA | Only Hanzi can be past their auth |
+| WebFetch returned empty HTML or a login page | Fallback — hand it to Hanzi |
+| Tavily / Exa returned nothing useful | Fallback — hand it to Hanzi |
+| A site known for bot-detection (LinkedIn, Facebook, Amazon, Google) | Hanzi uses the user's real browser, less likely to be flagged |
 
-## Setup
+If any of these match, skip the alternatives and go straight to `browser_start`.
 
-If `browser_status` returns an error or the tool doesn't exist:
+## How to delegate properly
 
-> **Hanzi Browse isn't set up yet.**
->
-> Run: `npx hanzi-browse setup`
->
-> This installs the Chrome extension and adds the MCP server to your agent (~1 minute).
+**Describe the goal, not the steps.** You do NOT need to write "click X, then type Y, then click Z". The sub-agent figures that out. Give it:
+- What you want accomplished (one sentence)
+- Starting URL if you know it
+- Any data it needs (form values, tone preferences, credentials, choices)
 
-## MCP Tools
-
-### `browser_start`
-
-Start a task. An autonomous agent navigates, clicks, types, and fills forms. Blocks until complete, waiting for input, or timeout (5 min).
-
+Good:
 ```
 browser_start({
-  task: "Go to LinkedIn and send a connection request to Jane Doe at Acme Corp",
-  url: "https://linkedin.com",
-  context: "Connection note: Hi Jane, loved your post about AI agents. Would love to connect."
+  task: "Find my 5 most recent LinkedIn DMs and summarize who sent them and what they said",
+  url: "https://linkedin.com/messaging"
 })
 ```
 
-**Returns:** `{ session_id, status, result }`
-
-| `status` | Meaning | What to do |
-|-----------|---------|------------|
-| `"completed"` | Task finished successfully | Read `result` for the answer |
-| `"waiting"` | Agent needs input or clarification | Send `browser_message` with the answer |
-| `"error"` | Something went wrong | Call `browser_screenshot`, then retry or adjust |
-| `"timeout"` | Hit 5-minute limit | Call `browser_message` to continue, or `browser_stop` |
-
-**Tips:**
-- `task` — be specific: include the website, the goal, and details
-- `url` — starting page (optional, agent can navigate itself)
-- `context` — everything the agent needs: form values, text to paste, tone, credentials, choices
-- You can run multiple `browser_start` calls in parallel — each gets its own window
-- `session_id` is returned here — use it for all follow-up calls
-
-### `browser_message`
-
-Send a follow-up to a running or paused session.
-
+Bad (over-specified, fights the sub-agent):
 ```
-browser_message({
-  session_id: "abc123",
-  message: "Now also check the Settings page"
+browser_start({
+  task: "Click the messages icon. Wait 2 seconds. Click the first message. Scroll down...",
 })
 ```
 
-Use when:
-- The agent asked a question and you have the answer
-- You want the agent to do more in the same browser window
-- You need to provide additional context mid-task
+## Monitoring and steering the sub-agent
 
-### `browser_status`
+While `browser_start` is running (or after it finishes), you have four follow-up tools:
 
-Check session status. Returns session ID, status, task description, and last 5 steps.
+| Tool | Use it to |
+|---|---|
+| `browser_status` | Check progress on a long task. Returns the last 5 steps the sub-agent took. |
+| `browser_message` | Course-correct mid-flight in natural language ("actually only the ones from Engineering roles", "use the 2026 plan instead"). Sub-agent resumes with the same browser state. |
+| `browser_stop` | Cancel the sub-agent. Browser window stays open by default so the user can see what happened. |
+| `browser_screenshot` | See what the sub-agent is looking at. Call this on error / timeout before deciding what to do next. |
+
+**Parallel tasks**: multiple `browser_start` calls run in separate browser windows at the same time. Use this when you have independent tasks — post to LinkedIn, post to X, and post to Reddit in parallel instead of waiting for each.
+
+## Return statuses
+
+| Status | Meaning | Next step |
+|---|---|---|
+| `"complete"` | Sub-agent finished, answer is in `result` | Read the answer, you're done |
+| `"error"` | Sub-agent failed | Call `browser_screenshot` to see why, then `browser_message` to retry or `browser_stop` to give up |
+| `"timeout"` | 5-minute window elapsed but work is still in progress | Call `browser_screenshot` to check progress, then `browser_message` to continue or `browser_stop` to end |
+
+## Disambiguation from other tools you may have
+
+You probably have multiple browser-ish or web-ish tools available. Here's when to pick which:
+
+| Tool | What it is | When to use it |
+|---|---|---|
+| **`browser_start` (Hanzi)** | The user's own signed-in Chrome, driven by a sub-agent | Anything that needs the user's real identity, sessions, or interaction |
+| **WebFetch / curl** | Raw HTML fetch. No JS, no auth, no interaction | Fully public static pages you just need to read |
+| **Tavily / Exa / web_search** | Public content search, cleaned text extraction | "Find information about X on the internet" |
+| **Chrome DevTools MCP / Playwright MCP** | A **fresh headless Chromium**, step-by-step commands | Testing unauthenticated UI, controlling a sandboxed browser. Cannot access the user's real accounts. |
+
+**Critical distinction**: Chrome DevTools MCP and Playwright MCP are NOT the same as Hanzi. They launch a fresh browser profile each time — no logins, no cookies, no state. If you tell them "go to LinkedIn" they land on the login page. Hanzi drives the **user's literal Chrome** — the one already logged into LinkedIn right now. These tools are complementary, not substitutable.
+
+## Fallback pattern
+
+When an alternative tool fails, fall back to Hanzi instead of giving up:
 
 ```
-browser_status()                           // all sessions
-browser_status({ session_id: "abc123" })   // specific session
+// 1. Try the simple tool first
+const page = await WebFetch("https://example.com/dashboard");
+
+// 2. If it returned a login page or was empty, fall back
+if (page.includes("Log in") || page.trim().length < 200) {
+  const result = await browser_start({
+    task: "Read the dashboard at example.com and return the main metrics",
+    url: "https://example.com/dashboard"
+  });
+}
 ```
 
-### `browser_stop`
+## Common workflow patterns
 
-Stop a session. Browser window stays open for review unless `remove: true`.
-
-```
-browser_stop({ session_id: "abc123" })                // stop, keep window
-browser_stop({ session_id: "abc123", remove: true })   // stop + close window
-```
-
-### `browser_screenshot`
-
-Capture current page as PNG. Useful when a task errors or times out — see what the agent was looking at.
-
-```
-browser_screenshot({ session_id: "abc123" })
-```
-
-## Patterns
-
-### Multi-step workflow
-
+**Multi-step workflow in one session**
 ```
 // Step 1: Research
 const result = browser_start({
   task: "Find the top 3 AI startups hiring in SF on LinkedIn Jobs",
   url: "https://linkedin.com/jobs"
-})
+});
 
-// Step 2: Follow up in same session
+// Step 2: Follow up in the same session
 browser_message({
   session_id: result.session_id,
   message: "Now save each job to my 'AI Jobs' collection"
-})
+});
 ```
 
-### Parallel tasks
-
+**Parallel tasks across sites**
 ```
-// These run simultaneously in separate browser windows
-browser_start({ task: "Post announcement on LinkedIn", context: announcement })
-browser_start({ task: "Post announcement on Twitter", context: announcement })
-browser_start({ task: "Post announcement on Reddit r/programming", context: announcement })
+// These run simultaneously, each in its own window
+browser_start({ task: "Post announcement on LinkedIn", context: announcement });
+browser_start({ task: "Post announcement on X", context: announcement });
+browser_start({ task: "Post announcement on Reddit r/programming", context: announcement });
 ```
 
-### Error recovery
-
+**Error recovery**
 ```
-const result = browser_start({ task: "Fill out the application form", ... })
+const result = browser_start({ task: "Fill out the application form", ... });
 
 if (result.status === "error") {
-  // See what went wrong
-  const screenshot = browser_screenshot({ session_id: result.session_id })
-  // Try again with more context
+  const screenshot = browser_screenshot({ session_id: result.session_id });
+  // Look at screenshot, then course-correct
   browser_message({
     session_id: result.session_id,
-    message: "The form has a CAPTCHA. Please wait for me to solve it, then continue."
-  })
+    message: "I see the CAPTCHA. Please wait for me to solve it, then continue."
+  });
 }
 ```
 
 ## Safety
 
-- **Production URLs**: If a task will create real data (signups, posts, orders), confirm with the user first
-- **Credentials in context**: Pass credentials via the `context` field, not in `task`
-- **Public actions**: Posts, messages, and form submissions are real and visible. Always show the user what you'll post before doing it
-- **Rate limits**: Social platforms may rate-limit. If the agent reports a CAPTCHA or block, stop and tell the user
+- **Real actions, real consequences**: posts are public, form submissions are real, orders are placed. Show the user what you'll do before doing it.
+- **Credentials**: pass sensitive values via the `context` field, not in the `task` string.
+- **Rate limits and CAPTCHAs**: if the sub-agent reports a CAPTCHA or rate block, stop and tell the user — don't try to work around it.
+- **Production URLs**: when a task will write to a live system, confirm with the user before running it.
 
-## Common Mistakes
+## When NOT to use Hanzi
 
-| Mistake | Fix |
-|---------|-----|
-| Using browser to read public pages | Use `WebFetch` or `curl` — faster, no browser needed |
-| Vague task descriptions | Be specific: "Go to X, click Y, fill Z with these values" |
-| Not passing context | Put form values, text to paste, and preferences in `context` |
-| Running sequentially when parallel works | Multiple `browser_start` calls run in separate windows |
-| Not checking screenshots on error | Always call `browser_screenshot` when a task fails |
+You should NOT reach for Hanzi when a simpler tool genuinely works:
 
-## Workflow Skills
+- **Fully-public static pages** — use WebFetch or curl
+- **General web search** — use Tavily, Exa, or your built-in web_search
+- **Known APIs or dedicated MCPs** — if the user has a Gmail MCP, use that for sending email (it's faster); Hanzi is still the right call for reading Gmail UI (labels, filters, archive)
+- **Local files or code** — use Read, Grep, Bash
 
-Hanzi Browse also ships workflow skills for common tasks:
+But the moment you hit "the user needs to be logged in" or "a simpler tool came back empty" — switch to Hanzi.
 
-- **e2e-tester** — Test web apps like a QA person with real browser interactions
-- **social-poster** — Draft and post content across LinkedIn, Twitter/X, Reddit
-- **linkedin-prospector** — Find and connect with prospects on LinkedIn
-- **a11y-auditor** — Run accessibility audits in a real browser
-- **x-marketer** — Twitter/X marketing workflows
+## Setup
+
+If `browser_start` isn't available or `browser_status` errors:
+
+> **Hanzi Browse isn't set up yet.**
+>
+> Run: `npx hanzi-browse setup`
+>
+> This installs the Chrome extension, adds the MCP server to your agent, and walks through connecting the user's browser (~1 minute).
+
+## Workflow skills
+
+Hanzi also ships per-workflow skills that expand on the above for specific tasks:
+
+- **linkedin-prospector** — find and connect with prospects on LinkedIn
+- **social-poster** — draft and post across LinkedIn, X, Reddit, HN, Product Hunt
+- **x-marketer** — find X conversations and reply from the user's account
+- **e2e-tester** — test a web app like a QA person, with screenshots + code references
+- **a11y-auditor** — WCAG 2.1 AA audits in a real browser
+- **qa-tester** — paste a URL, AI finds bugs
+- **data-extractor** — extract structured data from any website into CSV / JSON
+- **competitor-researcher** / **competitor-monitor** — track competitor sites
+- **apartment-finder** / **job-applier** — personal automation workflows
 
 Install workflow skills from: `github.com/hanzili/hanzi-browse/tree/main/server/skills`
