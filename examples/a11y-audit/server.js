@@ -106,15 +106,27 @@ async function llm(system, user) {
 
 async function fetchPageSnapshot(url) {
   try {
+    // Hard-cap the upstream fetch at 5s so a slow or unreachable target site
+    // can never stall the /api/plan request.
     const res = await fetch(url, {
       headers: { "User-Agent": "Hanzi A11y Audit Preview Bot" },
       redirect: "follow",
+      signal: AbortSignal.timeout(5000),
     });
     const html = await res.text();
     return html.replace(/\s+/g, " ").slice(0, 12000);
   } catch {
     return "";
   }
+}
+
+// Race a promise against a timeout; resolve to `fallback` if the timeout fires.
+// Used to keep /api/plan snappy even if the LLM (ccproxy / Claude) is slow.
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
 }
 
 function normalizeUrl(value) {
@@ -357,7 +369,16 @@ app.post("/api/plan", async (req, res) => {
     const url = normalizeUrl(req.body.url || "");
     const scope = req.body.scope === "deep" ? "deep" : "quick";
     const htmlSnippet = await fetchPageSnapshot(url);
-    const planned = await generatePlan(url, scope, htmlSnippet).catch(() => null);
+    // Give the LLM 8s to produce a custom plan; otherwise fall back so the
+    // user sees the "Connect browser" step in <10s instead of waiting ~60s.
+    // The fallback plan is perfectly usable — the real audit work happens in
+    // the subsequent /api/audit-phase calls, which is where the LLM is
+    // actually doing heavy lifting.
+    const planned = await withTimeout(
+      generatePlan(url, scope, htmlSnippet).catch(() => null),
+      8000,
+      null,
+    );
     const fallback = buildPlanFallback(url, scope);
     const audit = {
       id: `audit-${Date.now()}`,
@@ -531,7 +552,11 @@ Return JSON:
   }
 });
 
-app.listen(PORT, () => {
+// Node 18+ defaults server.requestTimeout to 5 minutes. Our audit-phase runs
+// a browser task with a hanziClient.runTask timeout of 8 minutes, so without
+// this the client sees "TypeError: Failed to fetch" when Node closes the
+// socket mid-request. Give long tasks 15 minutes of headroom.
+const server = app.listen(PORT, () => {
   console.log(`
   A11y Audit — Free Tool by Hanzi Browse
   http://localhost:${PORT}
@@ -541,3 +566,6 @@ app.listen(PORT, () => {
   Rate limits: ${JSON.stringify(LIMITS)}
   `);
 });
+server.requestTimeout = 15 * 60 * 1000;  // 15 min (runTask max is 8 min)
+server.headersTimeout = 16 * 60 * 1000;  // must be > requestTimeout
+server.keepAliveTimeout = 65 * 1000;

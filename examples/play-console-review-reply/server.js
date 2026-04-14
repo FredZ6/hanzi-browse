@@ -556,7 +556,10 @@ IMPORTANT: Only reply to the review that matches both the reviewer name AND the 
 
 // ── Start ─────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+// Node 18+ defaults server.requestTimeout to 5 minutes. Our fetch-reviews and
+// post-response endpoints run browser tasks that can take several minutes —
+// bump the Node HTTP timeout so long in-flight requests don't get killed.
+const server = app.listen(PORT, () => {
   console.log(`
   Play Console Review Reply — Free Tool by Hanzi Browse
   http://localhost:${PORT}
@@ -566,3 +569,6 @@ app.listen(PORT, () => {
   Rate limits: ${JSON.stringify(LIMITS)}
   `);
 });
+server.requestTimeout = 15 * 60 * 1000;  // 15 min
+server.headersTimeout = 16 * 60 * 1000;  // must be > requestTimeout
+server.keepAliveTimeout = 65 * 1000;

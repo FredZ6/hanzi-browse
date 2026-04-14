@@ -109,15 +109,26 @@ async function llm(system, user) {
 
 async function fetchPageSnapshot(url) {
   try {
+    // Hard-cap the upstream fetch so a slow target site can't stall /api/plan.
     const res = await fetch(url, {
       headers: { "User-Agent": "Hanzi QA Tester Preview Bot" },
       redirect: "follow",
+      signal: AbortSignal.timeout(5000),
     });
     const html = await res.text();
     return html.replace(/\s+/g, " ").slice(0, 12000);
   } catch {
     return "";
   }
+}
+
+// Race a promise against a timeout; resolve to `fallback` if the timeout fires.
+// Keeps /api/plan snappy even when the LLM (ccproxy / Claude) is slow.
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
 }
 
 function normalizeUrl(value) {
@@ -351,7 +362,14 @@ app.post("/api/plan", async (req, res) => {
 
     // Crawl the page first to give the planner real context about app structure
     const htmlSnippet = await fetchPageSnapshot(url);
-    const planned = await generatePlan(url, scope, description, htmlSnippet).catch(() => null);
+    // 8s budget on the plan LLM call — fall back to the static plan so the
+    // user sees the "Connect browser" step in <10s instead of waiting ~60s.
+    // The real test execution still uses the LLM in /api/test-case.
+    const planned = await withTimeout(
+      generatePlan(url, scope, description, htmlSnippet).catch(() => null),
+      8000,
+      null,
+    );
     const fallback = buildPlanFallback(url, scope, description);
 
     const plan = {
@@ -522,7 +540,10 @@ Return JSON:
   }
 });
 
-app.listen(PORT, () => {
+// Node 18+ defaults server.requestTimeout to 5 minutes; our /api/test-case
+// runs runTask with an 8 minute timeout. Without bumping this, long tests
+// see "TypeError: Failed to fetch" when Node kills the socket mid-request.
+const server = app.listen(PORT, () => {
   console.log(`
   QA Tester — Free Tool by Hanzi Browse
   http://localhost:${PORT}
@@ -532,3 +553,6 @@ app.listen(PORT, () => {
   Rate limits: ${JSON.stringify(LIMITS)}
   `);
 });
+server.requestTimeout = 15 * 60 * 1000;  // 15 min
+server.headersTimeout = 16 * 60 * 1000;  // must be > requestTimeout
+server.keepAliveTimeout = 65 * 1000;

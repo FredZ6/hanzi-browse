@@ -546,7 +546,11 @@ RULES:
 
 // ── Serve ────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
+// Node 18+ defaults server.requestTimeout to 5 minutes. Our browser tasks
+// use runTask with a 10 minute timeout, so we bump Node's default to avoid
+// killing long in-flight requests and surfacing "TypeError: Failed to fetch"
+// to the client.
+const server = app.listen(PORT, () => {
   console.log(`
   X Marketing — Free Tool by Hanzi Browse
   http://localhost:${PORT}
@@ -556,3 +560,6 @@ app.listen(PORT, () => {
   Rate limits: ${JSON.stringify(LIMITS)}
   `);
 });
+server.requestTimeout = 15 * 60 * 1000;  // 15 min
+server.headersTimeout = 16 * 60 * 1000;  // must be > requestTimeout
+server.keepAliveTimeout = 65 * 1000;
