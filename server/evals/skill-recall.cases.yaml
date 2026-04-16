@@ -1,0 +1,115 @@
+- id: linkedin-dms
+  task: "Check my 5 most recent LinkedIn DMs and summarize who sent them"
+  expected: browser_start
+  rationale: "Needs user's logged-in LinkedIn session"
+
+- id: hn-top
+  task: "What are the top 3 stories on Hacker News right now"
+  expected: WebFetch
+  allowed_alternatives: [web_search]
+  rationale: "HN homepage is public, static — no auth needed"
+
+- id: python-gil
+  task: "Search the web for the current status of the Python GIL removal PEP"
+  expected: web_search
+  allowed_alternatives: [WebFetch]
+  rationale: "Public-web question, search is the primary tool"
+
+- id: read-docs
+  task: "Read https://docs.python.org/3/whatsnew/3.13.html and summarize"
+  expected: WebFetch
+  rationale: "Public static documentation page, no login"
+
+- id: post-linkedin
+  task: "Post 'launch day tomorrow' to my LinkedIn feed"
+  expected: browser_start
+  rationale: "Writing to user's real account requires their session"
+
+- id: package-json
+  task: "What are the dev dependencies in my package.json"
+  expected: Read
+  rationale: "Local file, no browser needed"
+
+- id: run-tests
+  task: "Run the test suite"
+  expected: Bash
+  rationale: "Shell command"
+
+- id: localhost-signup
+  task: "Test the signup flow on localhost:3000 using my real Google account"
+  expected: browser_start
+  rationale: "Needs real Google OAuth session, interaction with a live browser"
+
+- id: amazon-scrape
+  task: "Get the current price of https://www.amazon.com/dp/B0CHWV2DKJ"
+  expected: browser_start
+  rationale: "Amazon bot-detects plain HTTP fetches; real browser is needed"
+
+- id: tweet-summary
+  task: "Summarize the tweet at https://x.com/sama/status/12345"
+  expected: WebFetch
+  allowed_alternatives: [browser_start]
+  rationale: "Tweet is public; WebFetch first, fall back to hanzi if login wall"
+
+- id: gmail-count
+  task: "How many unread emails do I have"
+  expected: browser_start
+  rationale: "Inbox requires login; browser is the only path unless a Gmail MCP exists (assume not)"
+
+- id: github-issue
+  task: "What's the latest comment on https://github.com/facebook/react/issues/25"
+  expected: WebFetch
+  allowed_alternatives: [browser_start]
+  rationale: "Public issue page, static HTML"
+
+- id: jira-ticket
+  task: "What's the status of ENG-1234 in our Jira"
+  expected: browser_start
+  rationale: "Jira requires login to user's workspace"
+
+- id: adminpanel
+  task: "Pull the last 7 days of active users from my Stripe dashboard"
+  expected: browser_start
+  rationale: "Stripe dashboard is authenticated UI"
+
+- id: weather
+  task: "What's the weather in San Francisco right now"
+  expected: web_search
+  allowed_alternatives: [WebFetch]
+  rationale: "Public info, search is fine; WebFetch weather.com also OK"
+
+- id: fill-form
+  task: "Apply to the Senior Engineer role at https://jobs.example.com/123 using my resume"
+  expected: browser_start
+  rationale: "Interaction + form submission on real account"
+
+- id: checkout-cart
+  task: "Complete my Amazon checkout with the 3 items I added yesterday"
+  expected: browser_start
+  rationale: "Requires user's session + cart state + payment"
+
+- id: csv-extract
+  task: "Extract the data table at https://en.wikipedia.org/wiki/List_of_countries_by_GDP into CSV"
+  expected: WebFetch
+  allowed_alternatives: [browser_start]
+  rationale: "Wikipedia is public static HTML; WebFetch + parse is lighter than hanzi"
+
+- id: config-env
+  task: "What does the ANTHROPIC_API_KEY environment variable contain"
+  expected: Bash
+  rationale: "Local env, shell command"
+
+- id: greeting
+  task: "Say hi"
+  expected: none
+  rationale: "Conversational, no tool needed"
+
+- id: draft-net-worth
+  task: "Use my Morgan Stanley account to check my portfolio value"
+  expected: browser_start
+  rationale: "Bank requires real 2FA + login; only hanzi can reach it"
+
+- id: slack-dm
+  task: "Send a Slack DM to Alice saying 'on my way'"
+  expected: browser_start
+  rationale: "Real Slack account, interaction; unless a Slack MCP exists (assume not)"

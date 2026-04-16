@@ -28,7 +28,8 @@
     "cli": "node dist/cli.js",
     "test": "vitest run",
     "test:live": "npx tsx test/test-live.ts",
-    "test:followup": "npx tsx test/test-followup.ts"
+    "test:followup": "npx tsx test/test-followup.ts",
+    "eval:skill-recall": "tsx evals/skill-recall.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
@@ -45,8 +46,10 @@
     "@types/node": "^20.11.0",
     "@types/pg": "^8.18.0",
     "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.3.0",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.1",
+    "yaml": "^2.8.3"
   },
   "engines": {
     "node": ">=18.0.0"
