@@ -437,17 +437,23 @@ async function cmdSkills(): Promise<void> {
 
   if (subcommand === 'install') {
     const skillName = args[2];
+    const useLatest = args.includes('--latest');
     if (!skillName) {
-      console.error('Usage: hanzi-browse skills install <name>');
+      console.error('Usage: hanzi-browse skills install <name> [--latest]');
       process.exit(EXIT_CLI_ERROR);
     }
-    const skill = skills.find(s => s.name === skillName);
-    if (!skill) {
-      console.error(`Unknown skill: ${skillName}`);
-      console.error(`Available: ${skills.map(s => s.name).join(', ')}`);
-      process.exit(EXIT_CLI_ERROR);
+    if (useLatest) {
+      await installSkillFromGitHub(skillName);
+    } else {
+      const skill = skills.find(s => s.name === skillName);
+      if (!skill) {
+        console.error(`Unknown skill: ${skillName}`);
+        console.error(`Bundled: ${skills.map(s => s.name).join(', ')}`);
+        console.error(`Try --latest to fetch from GitHub.`);
+        process.exit(EXIT_CLI_ERROR);
+      }
+      await installSkillFromLocal(skill);
     }
-    await installSkillFromLocal(skill);
     return;
   }
 
@@ -466,6 +472,23 @@ async function installSkillFromLocal(skill: SkillMeta): Promise<void> {
     try { copyFileSync(join(skill.path, file), join(targetDir, file)); } catch {}
   }
   console.log(`Installed ${skill.name} (bundled) → ${targetDir}`);
+}
+
+async function installSkillFromGitHub(skillName: string): Promise<void> {
+  const targetDir = detectSkillsDir(skillName);
+  mkdirSync(targetDir, { recursive: true });
+
+  const url = `${SKILLS_BASE_URL}/${skillName}/SKILL.md`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const content = await response.text();
+    writeFileSync(join(targetDir, 'SKILL.md'), content);
+    console.log(`Installed ${skillName} (latest) → ${targetDir}`);
+  } catch (err: any) {
+    console.error(`Failed to fetch ${skillName}: ${err.message}`);
+    process.exit(EXIT_CLI_ERROR);
+  }
 }
 
 function detectSkillsDir(skillName: string): string {

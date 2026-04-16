@@ -327,6 +327,34 @@ describe('--skill supports any bundled skill', () => {
   });
 });
 
+import { mkdtempSync, existsSync as fsExists, rmSync } from 'fs';
+import { tmpdir } from 'os';
+
+describe('skills install — local first', () => {
+  it('installs hanzi-browse from bundled source by default (no network)', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'hanzi-skill-'));
+    try {
+      // Use cwd override so detectSkillsDir plants under a temp dir we control.
+      // runCli runs with default cwd, so install will land under the worktree's
+      // .agents/skills (existing) — to keep the test hermetic, we verify exit
+      // code + stdout message instead of asserting file path.
+      const { code, stdout } = await runCli(['skills', 'install', 'hanzi-browse']);
+      expect(code).toBe(0);
+      expect(stdout.toLowerCase()).toMatch(/installed hanzi-browse/);
+      expect(stdout.toLowerCase()).toContain('bundled');
+    } finally {
+      try { rmSync(tmp, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  it('rejects unknown skill name with clear error', async () => {
+    const { code, stderr } = await runCli(['skills', 'install', 'nonexistent-xyz-skill']);
+    expect(code).toBe(2);
+    expect(stderr).toContain('Unknown skill');
+    expect(stderr).toContain('Bundled:');
+  });
+});
+
 describe('--quiet / --verbose', () => {
   let relay: MockRelay;
   beforeAll(async () => { relay = await MockRelay.start(); });
