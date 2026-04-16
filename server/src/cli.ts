@@ -567,6 +567,8 @@ async function cmdSetup(): Promise<void> {
   let yes = false;
   let all = false;
   let skills: string[] | undefined;
+  let managed = false;
+  let apiKey: string | undefined;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--only' && args[i + 1]) only = args[++i];
@@ -576,9 +578,11 @@ async function cmdSetup(): Promise<void> {
       skills = args[++i].split(',').map(s => s.trim()).filter(Boolean);
     } else if (arg.startsWith('--skills=')) {
       skills = arg.slice('--skills='.length).split(',').map(s => s.trim()).filter(Boolean);
-    }
+    } else if (arg === '--managed') managed = true;
+    else if (arg === '--api-key' && args[i + 1]) apiKey = args[++i];
+    else if (arg.startsWith('--api-key=')) apiKey = arg.slice('--api-key='.length);
   }
-  await runSetup({ only, yes, all, skills });
+  await runSetup({ only, yes, all, skills, managed, apiKey });
 }
 
 function cmdVersion(): void {
@@ -631,6 +635,8 @@ Commands:
     --yes, -y               Non-interactive mode (installs core skill only)
     --all                   Install every bundled skill (skip the prompt)
     --skills a,b,c          Install just these skills (core always included)
+    --managed               Skip BYOM, configure managed mode
+    --api-key <key>         Use this HANZI_API_KEY (required with --managed in non-interactive)
 
   skills                    List available agent skills
   skills install <name>     Download a skill into your project

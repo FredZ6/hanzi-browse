@@ -699,9 +699,11 @@ async function handleManagedAccess(): Promise<void> {
   }
 }
 
-async function attemptManagedPair(apiKey: string): Promise<void> {
-  console.log('');
-  const sp = spinner('Pairing extension with your managed workspace...');
+async function attemptManagedPair(apiKey: string, isInteractive = true): Promise<void> {
+  if (isInteractive) {
+    console.log('');
+  }
+  const sp = spinner('Pairing extension with your managed workspace...', isInteractive);
   try {
     const { createPairingToken } = await import('./managed-client.js');
     const pairing = await createPairingToken({ apiKey, apiUrl: process.env.HANZI_API_URL });
@@ -1065,7 +1067,7 @@ async function installSkills(
 
 // ── Main ───────────────────────────────────────────────────────────────
 
-export async function runSetup(options: { only?: string; yes?: boolean; all?: boolean; skills?: string[] } = {}): Promise<void> {
+export async function runSetup(options: { only?: string; yes?: boolean; all?: boolean; skills?: string[]; managed?: boolean; apiKey?: string } = {}): Promise<void> {
   initTelemetry();
   trackEvent("setup_started");
 
@@ -1215,7 +1217,35 @@ export async function runSetup(options: { only?: string; yes?: boolean; all?: bo
   // ── Step 3: Access mode ──
   let accessMode: AccessMode = 'byom';
 
-  if (interactive) {
+  if (options.managed && options.apiKey) {
+    // Non-interactive managed mode with pre-supplied key
+    accessMode = 'managed';
+    log('\n  Step 3: Managed mode (--managed --api-key)');
+    try {
+      const res = await fetch(`https://api.hanzilla.co/v1/billing/credits`, {
+        headers: { Authorization: `Bearer ${options.apiKey}` },
+      });
+      const data = await res.json() as any;
+      if (res.ok && data.free_remaining !== undefined) {
+        managedApiKey = options.apiKey;
+        log(`  ✓  Managed key validated (${data.free_remaining} free tasks remaining)`);
+      } else {
+        log(`  ✗  Invalid API key: ${data.error || 'authentication failed'}`);
+        trackEvent("setup_failed", { error_category: "invalid_api_key" });
+        await shutdownTelemetry();
+        rl?.close();
+        setTimeout(() => process.exit(0), 200);
+        return;
+      }
+    } catch (err: any) {
+      log(`  ●  Could not validate key (network error): ${err.message}. Proceeding.`);
+      managedApiKey = options.apiKey;
+    }
+    if (managedApiKey) {
+      await injectManagedKey(managedApiKey, detected);
+      await attemptManagedPair(managedApiKey, interactive);
+    }
+  } else if (interactive) {
     accessMode = await promptAccessMode(interactive);
 
     if (accessMode === 'byom') {
@@ -1278,7 +1308,10 @@ export async function runSetup(options: { only?: string; yes?: boolean; all?: bo
   } else {
     log('\n  Setup complete!');
     if (configured > 0) log(`     Restart your agents to pick up the new MCP config.`);
-    if (hasCreds) {
+    if (accessMode === 'managed' && managedApiKey) {
+      log('     Managed mode configured — 20 free tasks/month.');
+      log('\n  Try it: ask your agent "Go to Hacker News and tell me the top 3 stories"');
+    } else if (hasCreds) {
       log('     Credentials detected — Hanzi is ready to use.');
       log('\n  Try it: ask your agent "Go to Hacker News and tell me the top 3 stories"');
     } else {
