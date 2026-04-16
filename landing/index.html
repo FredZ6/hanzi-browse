@@ -92,14 +92,6 @@
         },
         {
           "@type": "Question",
-          "name": "Which AI agents does Hanzi work with?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "Claude Code, Cursor, Codex, Windsurf, VS Code Copilot, Gemini CLI, Amp, Cline, Roo Code, Kiro, Antigravity, and OpenCode. npx hanzi-browse setup detects every agent installed on your machine and merges Hanzi into each one's MCP config automatically — you don't hand-edit JSON."
-          }
-        },
-        {
-          "@type": "Question",
           "name": "Do I need a new API key, or can I reuse my Claude Pro or ChatGPT Plus subscription?",
           "acceptedAnswer": {
             "@type": "Answer",
@@ -112,14 +104,6 @@
           "acceptedAnswer": {
             "@type": "Answer",
             "text": "Depends on the mode. BYOM: nothing touches Hanzi servers — screenshots go directly from your machine to the AI provider you picked. Managed: pages and screenshots are processed by Google Vertex AI (Gemini) and not retained beyond the task. Hanzi never tracks browsing outside active tasks and doesn't sell data."
-          }
-        },
-        {
-          "@type": "Question",
-          "name": "What is MCP, and why does Hanzi use it?",
-          "acceptedAnswer": {
-            "@type": "Answer",
-            "text": "MCP (Model Context Protocol) is how modern AI agents load external tools. Hanzi ships as an MCP server, so any MCP-compatible agent gains five browser tools — browser_start, browser_message, browser_status, browser_stop, browser_screenshot — as soon as setup runs. No agent rebuild, no plugin marketplace."
           }
         },
         {
@@ -1332,20 +1316,12 @@ console.log(result.answer);</pre>
                         <div class="faq-body">Those spin up a fresh, clean browser in a sandbox — you re-login, fight CAPTCHAs, maintain cookies. Hanzi attaches to your <em>existing</em> Chrome via the DevTools Protocol, so sites see the session you're already logged into: Gmail, LinkedIn, your bank, your company's admin tools. No login automation, no session replay, no detection arms race.</div>
                     </details>
                     <details class="faq-item">
-                        <summary>Which AI agents does Hanzi work with?</summary>
-                        <div class="faq-body">Claude Code, Cursor, Codex, Windsurf, VS Code Copilot, Gemini CLI, Amp, Cline, Roo Code, Kiro, Antigravity, and OpenCode. <code>npx hanzi-browse setup</code> detects every agent installed on your machine and merges Hanzi into each one's MCP config automatically — you don't hand-edit JSON.</div>
-                    </details>
-                    <details class="faq-item">
                         <summary>Do I need a new API key, or can I reuse my Claude Pro / ChatGPT Plus subscription?</summary>
                         <div class="faq-body">Reuse what you already pay for. In BYOM mode, Hanzi reads credentials from Claude Code's OAuth, Codex's <code>auth.json</code>, the macOS Keychain, or a plain API key — whichever you have. If you already pay for Claude Pro/Max or GPT Plus, it's effectively free. No extra billing.</div>
                     </details>
                     <details class="faq-item">
                         <summary>Does my browsing data go to Hanzi's servers?</summary>
                         <div class="faq-body">Depends on the mode. <strong>BYOM:</strong> nothing touches Hanzi servers — screenshots go directly from your machine to the AI provider you picked. <strong>Managed:</strong> pages and screenshots are processed by Google Vertex AI (Gemini) and not retained beyond the task. Hanzi never tracks browsing outside active tasks and doesn't sell data.</div>
-                    </details>
-                    <details class="faq-item">
-                        <summary>What is MCP, and why does Hanzi use it?</summary>
-                        <div class="faq-body">MCP (Model Context Protocol) is how modern AI agents load external tools. Hanzi ships as an MCP server, so any MCP-compatible agent gains five browser tools — <code>browser_start</code>, <code>browser_message</code>, <code>browser_status</code>, <code>browser_stop</code>, <code>browser_screenshot</code> — as soon as setup runs. No agent rebuild, no plugin marketplace.</div>
                     </details>
                     <details class="faq-item">
                         <summary>Can I embed Hanzi in my own product?</summary>
