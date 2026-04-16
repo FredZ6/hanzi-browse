@@ -944,6 +944,14 @@
             color: var(--ink);
         }
 
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
         @media (max-width: 980px) {
             .hero,
             .section-head,
@@ -952,7 +960,8 @@
             .diff-grid,
             .path-grid,
             .prompt-grid,
-            .two-tracks {
+            .two-tracks,
+            .pricing-grid {
                 grid-template-columns: 1fr;
             }
         }
@@ -993,6 +1002,33 @@
 
             .mode-row {
                 grid-template-columns: 1fr;
+            }
+            .cta-band {
+                padding: 20px;
+            }
+            .cta-band .setup-copy pre {
+                font-size: 12px;
+            }
+        }
+        @media (max-width: 480px) {
+            .stack-card,
+            .diff-card,
+            .prompt-card,
+            .path-card,
+            .track-card {
+                padding: 18px 16px;
+            }
+            .signal-chip {
+                font-size: 12px;
+                padding: 10px 14px;
+            }
+            .faq-item summary {
+                padding: 14px 16px;
+                font-size: 15px;
+            }
+            .faq-item .faq-body {
+                padding: 0 16px 16px;
+                font-size: 14px;
             }
         }
     </style>
@@ -1198,7 +1234,7 @@
                     <p>Each tool is a hosted app built on the Hanzi SDK. Paste a URL, pair your browser, watch it run — then <a href="#build-with-hanzi" style="color: var(--purple); font-weight: 600;">build your own</a>.</p>
                 </div>
 
-                <div class="path-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px;">
+                <div class="path-grid" style="gap: 18px;">
                     <div>
                         <a class="path-card" href="https://tools.hanzilla.co/x-marketing/" target="_blank" rel="noreferrer" style="text-decoration: none; color: inherit; display: block;" aria-label="X Marketing free tool (opens in new tab)">
                             <div style="font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--green);">X / Twitter</div>
@@ -1317,7 +1353,7 @@ console.log(result.answer);</pre>
                     </div>
                     <p>Only charged for completed tasks. Errors and timeouts are always free.</p>
                 </div>
-                <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; max-width: 700px; margin: 0 auto;">
+                <div class="pricing-grid">
                     <div class="stack-card" style="padding: 22px; border-color: var(--accent);">
                         <span style="display: inline-block; margin-bottom: 10px; padding: 4px 10px; border-radius: 999px; background: #fceee4; color: var(--accent-dark); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;">Managed</span>
                         <h3 style="font-size: 28px; font-family: 'Iowan Old Style', Georgia, serif; margin-bottom: 4px;">$0.05 <span style="font-size: 14px; font-weight: 400; color: var(--muted);">/ task</span></h3>
