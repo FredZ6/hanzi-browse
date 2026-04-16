@@ -1449,6 +1449,43 @@ console.log(result.answer);</pre>
     </div>
 
     <script>
+        function trackEvent(name, params) {
+            if (typeof gtag === 'function') {
+                gtag('event', name, params || {});
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('[data-analytics]').forEach(function (el) {
+                el.addEventListener('click', function () {
+                    trackEvent(el.dataset.analytics, { label: el.textContent.trim().slice(0, 80) });
+                });
+            });
+
+            document.querySelectorAll('.faq-item').forEach(function (item) {
+                item.addEventListener('toggle', function () {
+                    if (item.open) {
+                        var q = item.querySelector('summary');
+                        trackEvent('faq_open', { question: q ? q.textContent.trim().slice(0, 120) : '' });
+                    }
+                });
+            });
+
+            var heroCtas = document.querySelectorAll('.hero-actions a.btn-green');
+            heroCtas.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    trackEvent('install_cta_click', { source: 'hero', label: a.textContent.trim() });
+                });
+            });
+
+            var apiLinks = document.querySelectorAll('a[href="#build-with-hanzi"]');
+            apiLinks.forEach(function (a) {
+                a.addEventListener('click', function () {
+                    trackEvent('sdk_cta_click', { source: a.closest('section')?.id || 'unknown', label: a.textContent.trim().slice(0, 60) });
+                });
+            });
+        });
+
         function switchInstallTab(tab, btn) {
             document.getElementById('install-terminal').style.display = tab === 'terminal' ? '' : 'none';
             document.getElementById('install-agent').style.display = tab === 'agent' ? '' : 'none';
