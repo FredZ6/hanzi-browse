@@ -85,7 +85,7 @@ function handleMessage(message: any): void {
       if (step && step !== 'thinking' && !step.startsWith('[thinking]')) {
         appendSessionLog(sessionId, step);
         writeSessionStatus(sessionId, { status: 'running' });
-        if (!jsonOutput) console.log(`  ${step.slice(0, 100)}`);
+        if (!jsonOutput) console.error(`  ${step.slice(0, 100)}`);
       }
       break;
 
@@ -98,7 +98,7 @@ function handleMessage(message: any): void {
       if (jsonOutput) {
         console.log(JSON.stringify(buildTaskCompletePayload(sessionId, result)));
       } else {
-        console.log(`\n[CLI] Task completed: ${sessionId}`);
+        console.error(`\n[CLI] Task completed: ${sessionId}`);
         console.log(answer);
       }
       pendingOutcome = 'complete';
@@ -194,10 +194,10 @@ async function cmdStart(): Promise<void> {
   }
 
   if (!jsonOutput) {
-    console.log('[CLI] Starting browser task...');
-    console.log(`  Task: ${task}`);
-    if (url) console.log(`  URL: ${url}`);
-    if (context) console.log(`  Context: ${context.substring(0, 50)}...`);
+    console.error('[CLI] Starting browser task...');
+    console.error(`  Task: ${task}`);
+    if (url) console.error(`  URL: ${url}`);
+    if (context) console.error(`  Context: ${context.substring(0, 50)}...`);
   }
 
   await initConnection();
@@ -222,11 +222,11 @@ async function cmdStart(): Promise<void> {
   });
 
   if (!jsonOutput) {
-    console.log(`\n[CLI] Session: ${sessionId}`);
-    console.log(`  Status: ~/.hanzi-browse/sessions/${sessionId}.json`);
-    console.log(`  Logs:   ~/.hanzi-browse/sessions/${sessionId}.log`);
-    console.log(`  Skills: run \`hanzi-browser skills\` for optimized workflows (e.g. LinkedIn prospecting)`);
-    console.log('\nWaiting for completion...\n');
+    console.error(`\n[CLI] Session: ${sessionId}`);
+    console.error(`  Status: ~/.hanzi-browse/sessions/${sessionId}.json`);
+    console.error(`  Logs:   ~/.hanzi-browse/sessions/${sessionId}.log`);
+    console.error(`  Skills: run \`hanzi-browser skills\` for optimized workflows (e.g. LinkedIn prospecting)`);
+    console.error('\nWaiting for completion...\n');
   }
 
   // Block until task completes

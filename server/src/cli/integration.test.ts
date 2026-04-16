@@ -75,3 +75,38 @@ describe('CLI exit codes', () => {
     expect(code).toBe(1);
   });
 });
+
+describe('CLI stdout/stderr separation', () => {
+  let relay: MockRelay;
+  beforeAll(async () => { relay = await MockRelay.start(); });
+  afterAll(async () => { await relay.stop(); });
+
+  it('non-json mode: result on stdout, progress/banners on stderr', async () => {
+    const startIdx = relay.received.length;
+    // Use the same setInterval pattern as the exit-code tests above.
+    // When the CLI sends mcp_start_task, emit a task_update then task_complete.
+    let emitted = false;
+    const timer = setInterval(() => {
+      for (let i = startIdx; i < relay.received.length; i++) {
+        const msg = relay.received[i];
+        if (msg.type === 'mcp_start_task' && !emitted) {
+          emitted = true;
+          relay.emit({ type: 'task_update', sessionId: msg.sessionId, step: 'visiting linkedin' });
+          relay.emit({ type: 'task_complete', sessionId: msg.sessionId, result: 'the answer' });
+          return;
+        }
+      }
+    }, 20);
+    const { stdout, stderr, code } = await runCli(
+      ['start', 'test'],
+      { HANZI_RELAY_URL: `ws://127.0.0.1:${relay.port}` },
+    );
+    clearInterval(timer);
+    expect(code).toBe(0);
+    expect(stdout).toContain('the answer');
+    expect(stdout).not.toContain('visiting linkedin');
+    expect(stdout).not.toContain('[CLI]');
+    expect(stderr).toContain('visiting linkedin');
+    expect(stderr).toContain('[CLI]');
+  });
+});
