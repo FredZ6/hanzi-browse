@@ -111,6 +111,7 @@ describe('detectCredentialSources', () => {
         homedir: '/Users/test',
         fileExists: (p) => p === codexPath,
         keychainHas: (s) => s === 'Claude Code-credentials',
+        env: {}, // isolate from process.env so new env-var checks don't inflate count
       });
 
       expect(sources).toHaveLength(2);
@@ -124,6 +125,7 @@ describe('detectCredentialSources', () => {
         homedir: '/home/test',
         fileExists: () => false,
         keychainHas: () => false,
+        env: {}, // isolate from process.env so new env-var checks don't inflate count
       });
 
       expect(sources).toEqual([]);

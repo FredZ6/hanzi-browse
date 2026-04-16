@@ -1,20 +1,22 @@
 /**
- * Credential source detection for CLI setup.
+ * Credential source detection for CLI setup + doctor.
  *
- * Claude Code stores OAuth tokens in one of two locations:
- *   1. ~/.claude/.credentials.json (file-based, all platforms)
- *   2. macOS Keychain under "Claude Code-credentials" (macOS only)
+ * Covers env vars (static API keys), file-based OAuth (Claude Code, Codex),
+ * Keychain (Claude Code on macOS), and service account files (Vertex AI).
  *
- * The original implementation only checked (1), missing most macOS users.
+ * Priority ordering (first = most preferred): managed > static env > OAuth file > Keychain > Codex.
  */
 
 import { join } from 'path';
 
-// ── Types ────────────────────────────────────────────────────────────
+export type CredentialSlug =
+  | 'claude' | 'codex'
+  | 'anthropic-env' | 'openai-env' | 'google-env' | 'openrouter-env'
+  | 'vertex-sa' | 'hanzi-managed';
 
 export interface CredentialSource {
   name: string;
-  slug: 'claude' | 'codex';
+  slug: CredentialSlug;
   path: string;
 }
 
@@ -23,6 +25,7 @@ export interface DetectOptions {
   homedir: string;
   fileExists: (path: string) => boolean;
   keychainHas: (service: string) => boolean;
+  env?: Record<string, string | undefined>;
 }
 
 export interface CredentialFlowState {
@@ -31,16 +34,37 @@ export interface CredentialFlowState {
   manualEntryChosen: boolean;
 }
 
-// ── Constants ────────────────────────────────────────────────────────
-
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 
-// ── Detection ────────────────────────────────────────────────────────
-
 export function detectCredentialSources(opts: DetectOptions): CredentialSource[] {
-  const { platform, homedir, fileExists, keychainHas } = opts;
+  const { platform, homedir, fileExists, keychainHas, env = process.env } = opts;
   const found: CredentialSource[] = [];
 
+  // Managed takes precedence — zero fragility, server-side LLM
+  if (env.HANZI_API_KEY) {
+    found.push({ name: 'Hanzi Managed', slug: 'hanzi-managed', path: 'HANZI_API_KEY env var' });
+  }
+
+  // Static API keys
+  if (env.ANTHROPIC_API_KEY) {
+    found.push({ name: 'Anthropic API key', slug: 'anthropic-env', path: 'ANTHROPIC_API_KEY env var' });
+  }
+  if (env.OPENAI_API_KEY) {
+    found.push({ name: 'OpenAI API key', slug: 'openai-env', path: 'OPENAI_API_KEY env var' });
+  }
+  if (env.GEMINI_API_KEY || env.GOOGLE_API_KEY) {
+    found.push({ name: 'Google API key', slug: 'google-env', path: 'GEMINI_API_KEY or GOOGLE_API_KEY env var' });
+  }
+  if (env.OPENROUTER_API_KEY) {
+    found.push({ name: 'OpenRouter API key', slug: 'openrouter-env', path: 'OPENROUTER_API_KEY env var' });
+  }
+
+  // Vertex service account
+  if (env.VERTEX_SA_PATH && fileExists(env.VERTEX_SA_PATH)) {
+    found.push({ name: 'Vertex AI service account', slug: 'vertex-sa', path: env.VERTEX_SA_PATH });
+  }
+
+  // Claude Code (file, then Keychain on macOS)
   const claudePath = join(homedir, '.claude', '.credentials.json');
   if (fileExists(claudePath)) {
     found.push({ name: 'Claude Code', slug: 'claude', path: claudePath });
@@ -48,6 +72,7 @@ export function detectCredentialSources(opts: DetectOptions): CredentialSource[]
     found.push({ name: 'Claude Code', slug: 'claude', path: 'macOS Keychain' });
   }
 
+  // Codex
   const codexPath = join(homedir, '.codex', 'auth.json');
   if (fileExists(codexPath)) {
     found.push({ name: 'Codex CLI', slug: 'codex', path: codexPath });
