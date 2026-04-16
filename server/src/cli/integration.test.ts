@@ -283,6 +283,50 @@ describe('doctor command', () => {
   });
 });
 
+describe('--skill supports any bundled skill', () => {
+  let relay: MockRelay;
+  beforeAll(async () => { relay = await MockRelay.start(); });
+  afterAll(async () => { await relay.stop(); });
+
+  it('accepts x-marketer (not just the 3 formerly hardcoded)', async () => {
+    const baseline = relay.received.length;
+    let emitted = false;
+    const sub = setInterval(() => {
+      for (let i = baseline; i < relay.received.length; i++) {
+        const msg = relay.received[i];
+        if (msg.type === 'mcp_start_task' && !emitted) {
+          emitted = true;
+          relay.emit({ type: 'task_complete', sessionId: msg.sessionId, result: 'ok' });
+          clearInterval(sub);
+          return;
+        }
+      }
+    }, 20);
+
+    const { code } = await runCli(
+      ['start', 'find trending X posts in AI', '--skill', 'x-marketer'],
+      { HANZI_RELAY_URL: `ws://127.0.0.1:${relay.port}` },
+    );
+    clearInterval(sub);
+    expect(code).toBe(0);
+    const startMsg = relay.received.find(m => m.type === 'mcp_start_task' && m.task?.includes('find trending'));
+    expect(startMsg).toBeDefined();
+    // Skill prompt was loaded — context should contain some characteristic text
+    expect(startMsg!.context).toBeTruthy();
+    expect(typeof startMsg!.context).toBe('string');
+    expect(startMsg!.context.length).toBeGreaterThan(50);
+  });
+
+  it('rejects an unknown skill with a clear error listing alternatives', async () => {
+    const { code, stderr } = await runCli(
+      ['start', 'task', '--skill', 'does-not-exist-xyz'],
+    );
+    expect(code).toBe(2);
+    expect(stderr).toContain('Unknown skill');
+    expect(stderr).toContain('Available:');
+  });
+});
+
 describe('--quiet / --verbose', () => {
   let relay: MockRelay;
   beforeAll(async () => { relay = await MockRelay.start(); });
