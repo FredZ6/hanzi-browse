@@ -1,0 +1,19 @@
+domain: stackoverflow.com
+cases:
+  # Read-only case against a public, historically-stable question.
+  # Exercises canonical-slug redirect handling (questions/{id} with no slug
+  # redirects to questions/{id}/{slug}) and basic content reading on SO.
+  - id: accepted-answer-count
+    task: |
+      Go to https://stackoverflow.com/questions/11227809 (the canonical
+      "Why is processing a sorted array faster than processing an unsorted
+      array?" question). Return the number of upvotes on the top/accepted
+      answer as a number only, with no extra words.
+    url: "https://stackoverflow.com/questions/11227809"
+    # The accepted answer on this question has had 27k+ upvotes for years —
+    # high signal on the agent reading the right number. We check for "27"
+    # as a prefix match which will stay accurate until the answer crosses 30k.
+    success_check:
+      type: llm_judge
+      prompt: "Does this answer consist of a number greater than 10000 (and nothing else meaningful)? Answer yes or no."
+    timeout_sec: 120

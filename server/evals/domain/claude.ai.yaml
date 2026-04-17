@@ -1,0 +1,20 @@
+domain: claude.ai
+cases:
+  # Mirror of chatgpt case: ProseMirror composer, different data-testid.
+  # If the agent reaches for form_input, the claude.ai skill's warning
+  # was ignored. The required call confirms the execCommand pattern.
+  - id: composer-uses-execcommand
+    task: |
+      Go to https://claude.ai/new and type the text "draft only — do not send"
+      into the main chat composer. Do NOT click the send arrow. After the text
+      appears in the composer, return the word "TYPED".
+    url: "https://claude.ai/new"
+    success_check:
+      type: agent_answer_contains
+      substring: "TYPED"
+    forbidden_tool_call:
+      tool: form_input
+    required_tool_call:
+      tool: javascript_tool
+      body_contains: "execCommand"
+    timeout_sec: 180
