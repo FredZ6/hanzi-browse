@@ -574,8 +574,8 @@ function RecentTasksCard() {
               }}
               onClick={() => setExpandedId(expanded ? null : id)}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                {/* status dot */}
+              {/* 2-line activity-feed layout: task text wraps under the dot, metadata below. */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                 <span
                   aria-label={status}
                   title={status}
@@ -585,26 +585,31 @@ function RecentTasksCard() {
                     height: 8,
                     borderRadius: '50%',
                     background: statusColor(status),
+                    marginTop: 6,
                   }}
                 />
-                {/* task text — min-width:0 is REQUIRED for ellipsis inside a flex child */}
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    fontSize: 13,
-                    color: 'var(--ink)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {task}
-                </span>
-                {/* right-aligned metadata */}
-                <span style={{ flexShrink: 0, fontSize: 11, color: 'var(--muted)', fontVariantNumeric: 'tabular-nums' }}>
-                  {duration ? `${duration} · ` : ''}{timeAgo(created)}
-                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* task: wrap and clamp to 2 lines (prevents a 10-line
+                       task description from eating the feed). */}
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: 'var(--ink)',
+                      lineHeight: 1.4,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {task}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3, fontVariantNumeric: 'tabular-nums' }}>
+                    {status}
+                    {duration ? ` · ${duration}` : ''}
+                    {' · '}{timeAgo(created)}
+                  </div>
+                </div>
               </div>
               {expanded && (
                 <div style={{ marginTop: 8, padding: 10, background: 'rgba(0,0,0,0.02)', borderRadius: 6, fontSize: 12, whiteSpace: 'pre-wrap' }}>
