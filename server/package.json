@@ -29,6 +29,7 @@
     "test": "vitest run",
     "test:live": "npx tsx test/test-live.ts",
     "test:followup": "npx tsx test/test-followup.ts",
+    "eval:domain": "tsx evals/domain-runner.ts",
     "eval:skill-recall": "tsx evals/skill-recall.ts"
   },
   "dependencies": {
