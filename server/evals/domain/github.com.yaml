@@ -1,11 +1,12 @@
 domain: github.com
 cases:
-  - id: issue-title
-    task: "Return the exact title of issue #25 at https://github.com/facebook/react/issues/25"
+  - id: pr-title
+    # Note: /issues/25 on this repo redirects to /pull/25 — agent should follow through.
+    task: "Return the exact title of https://github.com/facebook/react/issues/25"
     url: "https://github.com/facebook/react/issues/25"
     success_check:
       type: agent_answer_contains
-      substring: "Prevent bubbling"
+      substring: "Added responsive styles"
     timeout_sec: 60
 
   - id: file-finder-shortcut
