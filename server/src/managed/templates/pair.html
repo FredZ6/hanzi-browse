@@ -38,6 +38,43 @@
     const EXTENSION_URL = "{{EXTENSION_URL}}";
     const statusEl = document.getElementById("status");
 
+    function clearStatus() {
+      while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
+    }
+
+    function setStatusClass(name) {
+      statusEl.className = `status ${name}`;
+    }
+
+    function setStatusText(name, text) {
+      setStatusClass(name);
+      clearStatus();
+      statusEl.textContent = text;
+    }
+
+    function setStatusLoading(text) {
+      setStatusClass("status-connecting");
+      clearStatus();
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      statusEl.appendChild(spinner);
+      statusEl.appendChild(document.createTextNode(text));
+    }
+
+    function setStatusInstall(message, href, linkText, suffix) {
+      setStatusClass("status-install");
+      clearStatus();
+      statusEl.appendChild(document.createTextNode(message + " "));
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = linkText;
+      statusEl.appendChild(link);
+      statusEl.appendChild(document.createTextNode(suffix));
+    }
+
     // Step 1: Detect extension
     let extensionDetected = false;
 
@@ -47,8 +84,7 @@
         doPair();
       }
       if (e.data?.type === "HANZI_SESSION_SET") {
-        statusEl.className = "status status-success";
-        statusEl.innerHTML = "✓ Browser connected! You can close this tab.";
+        setStatusText("status-success", "✓ Browser connected! You can close this tab.");
       }
     });
 
@@ -56,15 +92,18 @@
 
     setTimeout(() => {
       if (!extensionDetected) {
-        statusEl.className = "status status-install";
-        statusEl.innerHTML = 'Hanzi extension not found. <a href="' + EXTENSION_URL + '" target="_blank">Install it here</a>, then reload this page.';
+        setStatusInstall(
+          "Hanzi extension not found.",
+          EXTENSION_URL,
+          "Install it here",
+          ", then reload this page."
+        );
       }
     }, 2000);
 
     // Step 2: Page calls register API directly (same-origin, no content script relay)
     async function doPair() {
-      statusEl.className = "status status-connecting";
-      statusEl.innerHTML = '<span class="spinner"></span> Connecting...';
+      setStatusLoading(" Connecting...");
       try {
         const res = await fetch(API_URL + "/v1/browser-sessions/register", {
           method: "POST",
@@ -73,8 +112,7 @@
         });
         const data = await res.json();
         if (!data.session_token) {
-          statusEl.className = "status status-error";
-          statusEl.innerHTML = "Pairing failed: " + (data.error || "unknown error");
+          setStatusText("status-error", "Pairing failed: " + (data.error || "unknown error"));
           return;
         }
         // Step 3: Tell extension to set the session (no API call needed from extension)
@@ -88,8 +126,7 @@
           relayUrl: relayUrl,
         }, "*");
       } catch (err) {
-        statusEl.className = "status status-error";
-        statusEl.innerHTML = "Pairing failed: " + err.message;
+        setStatusText("status-error", "Pairing failed: " + err.message);
       }
     }
   </script>

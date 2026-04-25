@@ -34,6 +34,45 @@
     const statusEl = document.getElementById("status");
     let paired = false;
 
+    function clearStatus() {
+      while (statusEl.firstChild) statusEl.removeChild(statusEl.firstChild);
+    }
+
+    function setStatusClass(name) {
+      statusEl.className = `status ${name}`;
+    }
+
+    function setStatusText(name, text) {
+      setStatusClass(name);
+      clearStatus();
+      statusEl.textContent = text;
+    }
+
+    function setStatusLoading(text) {
+      setStatusClass("status-connecting");
+      clearStatus();
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      statusEl.appendChild(spinner);
+      statusEl.appendChild(document.createTextNode(text));
+    }
+
+    function setInstallStatus() {
+      setStatusClass("status-error");
+      clearStatus();
+      statusEl.appendChild(document.createTextNode("Hanzi extension not detected. "));
+      const link = document.createElement("a");
+      link.href = "https://chromewebstore.google.com/detail/hanzi-browse/iklpkemlmbhemkiojndpbhoakgikpmcd";
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.style.color = "#ad5a34";
+      link.style.fontWeight = "600";
+      link.textContent = "Install it";
+      statusEl.appendChild(link);
+      statusEl.appendChild(document.createTextNode(", then reload this page."));
+    }
+
     window.addEventListener("message", (e) => {
       if (e.data?.type === "HANZI_EXTENSION_READY" && !paired) {
         pair();
@@ -41,25 +80,22 @@
       if (e.data?.type === "HANZI_PAIR_RESULT") {
         paired = true;
         if (e.data.success) {
-          statusEl.className = "status status-success";
-          statusEl.innerHTML = "✓ Connected! You can close this tab and use the sidepanel.";
+          setStatusText("status-success", "✓ Connected! You can close this tab and use the sidepanel.");
         } else {
-          statusEl.className = "status status-error";
-          statusEl.innerHTML = "Failed: " + (e.data.error || "unknown error");
+          setStatusText("status-error", "Failed: " + (e.data.error || "unknown error"));
         }
       }
     });
 
     function pair() {
-      statusEl.innerHTML = '<span class="spinner"></span> Pairing...';
+      setStatusLoading(" Pairing...");
       window.postMessage({ type: "HANZI_PAIR", token: TOKEN, apiUrl: API_URL }, "*");
     }
 
     window.postMessage({ type: "HANZI_PING" }, "*");
     setTimeout(() => {
       if (!paired) {
-        statusEl.className = "status status-error";
-        statusEl.innerHTML = 'Hanzi extension not detected. <a href="https://chromewebstore.google.com/detail/hanzi-browse/iklpkemlmbhemkiojndpbhoakgikpmcd" target="_blank" style="color:#ad5a34;font-weight:600">Install it</a>, then reload this page.';
+        setInstallStatus();
       }
     }, 3000);
   </script>
